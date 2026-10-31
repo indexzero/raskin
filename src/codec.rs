@@ -581,8 +581,17 @@ fn check_nesting(input: &str) -> std::result::Result<(), usize> {
             continue;
         }
         if bytes[i..].starts_with(b"//") {
-            while i < bytes.len() && bytes[i] != b'\n' && bytes[i] != b'\r' {
-                i += 1;
+            // KDL 2 line comments end at any newline in its grammar, not
+            // only ASCII LF/CR. Otherwise braces after a Unicode newline
+            // could evade this guard before reaching the recursive parser.
+            for ch in input[i..].chars() {
+                if matches!(
+                    ch,
+                    '\n' | '\r' | '\u{000b}' | '\u{000c}' | '\u{0085}' | '\u{2028}' | '\u{2029}'
+                ) {
+                    break;
+                }
+                i += ch.len_utf8();
             }
             continue;
         }

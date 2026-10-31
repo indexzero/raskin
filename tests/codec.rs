@@ -195,3 +195,30 @@ fn parser_limits_ignore_strings_and_comments() {
             .starts_with("syntax.kdl:")
     );
 }
+
+#[test]
+fn every_kdl_line_ending_terminates_comments_before_nesting_checks() {
+    for newline in [
+        "\r\n", "\r", "\n", "\u{0085}", "\u{000b}", "\u{000c}", "\u{2028}", "\u{2029}",
+    ] {
+        let prefix = format!("raskin 1\n// comment café {{{newline}");
+        let shallow = format!("{prefix}defaults {{ app {{ enabled #true; }} }}");
+        let document = decode(&shallow, "shallow.kdl").unwrap();
+        assert_eq!(
+            document.domains[&Domain::user("app")]["enabled"].value,
+            Value::Boolean(true),
+            "newline {newline:?}"
+        );
+
+        let deep = format!(
+            "{prefix}defaults {{ {}key 1;{} }}",
+            "x {".repeat(130),
+            "};".repeat(130)
+        );
+        let error = decode(&deep, "deep.kdl").unwrap_err().to_string();
+        assert!(
+            error.contains("nesting limit"),
+            "newline {newline:?}: {error}"
+        );
+    }
+}
