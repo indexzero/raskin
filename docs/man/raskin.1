@@ -1,0 +1,62 @@
+.TH RASKIN 1
+.SH NAME
+raskin \- Read macOS preferences into KDL and generate native commands
+.SH SYNOPSIS
+\fBraskin\fR [COMMAND]
+.SH DESCRIPTION
+Capture persisted macOS preferences as editable KDL, then generate a standalone .macos file. Raskin never executes generated commands. Capture is broad by default; desktop, input, and power select curated subsets.
+.PP
+.SH OPTIONS
+.TP
+\fB\-\-usage\-spec\fR
+Emit the jdx/usage interface specification
+.SH COMMANDS
+.TP
+\fBcapture\fR
+Read explicit persisted user, host, system and container preferences plus native power profiles. Unsupported or unreadable sources are recorded. No settings are changed. With \-\-from, only the supplied offline tree is read; there is no live fallback.
+.TP
+\fBgenerate\fR
+Validate saved KDL and emit native commands for a human to inspect and run. Generation never reads host settings or executes commands. Unsupported values fail before any output unless \-\-skip\-unsupported explicitly requests a partial script.
+.SH "RASKIN CAPTURE"
+Read explicit persisted user, host, system and container preferences plus native power profiles. Unsupported or unreadable sources are recorded. No settings are changed. With \-\-from, only the supplied offline tree is read; there is no live fallback.
+.PP
+\fBUsage:\fR raskin capture [OPTIONS]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-preset\fR \fI<PRESET>\fR
+Capture broad settings or a curated subset
+.RS
+\fIDefault: \fRbroad
+.RE
+.TP
+\fB\-\-from\fR \fI<DIRECTORY>\fR
+Read an offline tree containing user/, system/, containers/, host\-id.txt, and pmset.txt
+.TP
+\fB\-o, \-\-output\fR \fI<FILE>\fR
+Write KDL to this path; otherwise use stdout
+.TP
+\fB\-\-force\fR
+Atomically replace an existing output file
+.SH "RASKIN GENERATE"
+Validate saved KDL and emit native commands for a human to inspect and run. Generation never reads host settings or executes commands. Unsupported values fail before any output unless \-\-skip\-unsupported explicitly requests a partial script.
+.PP
+\fBUsage:\fR raskin generate [OPTIONS] <INPUT>
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-o, \-\-output\fR \fI<FILE>\fR
+Write the script to this path; otherwise use stdout
+.TP
+\fB\-\-force\fR
+Atomically replace an existing output file
+.TP
+\fB\-\-skip\-unsupported\fR
+Omit unsupported settings and name every omission in comments and diagnostics
+\fBArguments:\fR
+.PP
+.TP
+\fB<INPUT>\fR
+KDL input path, or \- to read stdin

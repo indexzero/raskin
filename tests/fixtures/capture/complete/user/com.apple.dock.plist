@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>autohide</key>
+	<integer>1</integer>
+	<key>largesize</key>
+	<integer>1</integer>
+	<key>location</key>
+	<string>/Users/example/Downloads</string>
+	<key>magnification</key>
+	<integer>1</integer>
+	<key>mineffect</key>
+	<integer>1</integer>
+	<key>minimize-to-application</key>
+	<integer>1</integer>
+	<key>mru-spaces</key>
+	<integer>1</integer>
+	<key>orientation</key>
+	<integer>1</integer>
+	<key>persistent-apps</key>
+	<array>
+		<string>/Applications/Example.app</string>
+	</array>
+	<key>show-recents</key>
+	<integer>1</integer>
+	<key>tilesize</key>
+	<integer>1</integer>
+</dict>
+</plist>

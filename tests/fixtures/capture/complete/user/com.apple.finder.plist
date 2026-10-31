@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>AppleShowAllFiles</key>
+	<integer>1</integer>
+	<key>FXPreferredViewStyle</key>
+	<integer>1</integer>
+	<key>RecentFolders</key>
+	<array>
+		<string>/Users/example</string>
+	</array>
+	<key>ShowPathbar</key>
+	<integer>1</integer>
+	<key>ShowStatusBar</key>
+	<integer>1</integer>
+</dict>
+</plist>

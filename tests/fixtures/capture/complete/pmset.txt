@@ -1,0 +1,12 @@
+Battery Power:
+ displaysleep 2
+ sleep 1
+ womp 0
+AC Power:
+ displaysleep 120
+ sleep 0
+ womp 1
+UPS Power:
+ haltlevel 20
+ haltafter 10
+ haltremain 5

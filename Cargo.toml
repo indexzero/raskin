@@ -1,0 +1,47 @@
+[package]
+name = "raskin"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96"
+license = "MIT"
+description = "Read macOS preferences into KDL and generate inspectable native commands"
+repository = "https://github.com/indexzero/raskin"
+readme = "README.md"
+keywords = ["macos", "preferences", "kdl", "dotfiles"]
+categories = ["command-line-utilities", "config"]
+default-run = "raskin"
+
+[workspace]
+resolver = "3"
+
+[dependencies]
+base64 = { version = "=0.23.1", default-features = false, features = ["std"] }
+clap = { version = "=4.6.7", features = ["derive", "wrap_help"] }
+clap_usage = "=5.0.0"
+kdl = { version = "=6.5.0", default-features = false, features = ["span"] }
+plist = { version = "=1.10.3", default-features = false, features = ["enable_unstable_features_that_may_break_with_minor_version_bumps"] }
+tempfile = "=3.27.0"
+thiserror = "=2.0.21"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[lints]
+workspace = true
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"
+
+[profile.dist]
+inherits = "release"
+lto = "thin"
+
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }.tar.xz"
+pkg-fmt = "txz"
+bin-dir = "{ name }-{ target }/{ bin }{ binary-ext }"
