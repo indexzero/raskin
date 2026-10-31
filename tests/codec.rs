@@ -217,7 +217,7 @@ fn every_kdl_line_ending_terminates_comments_before_nesting_checks() {
         );
         let error = decode(&deep, "deep.kdl").unwrap_err().to_string();
         assert!(
-            error.contains("nesting limit"),
+            error.contains("document exceeds the nesting limit of 128"),
             "newline {newline:?}: {error}"
         );
     }
