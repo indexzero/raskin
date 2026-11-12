@@ -74,3 +74,7 @@ The owner has opinions about the KDL schema and wants to review a concrete propo
 ## Capture output clarification: 2026-11-12
 
 The owner specified JSON-style omission: unavailable values are absent from saved KDL, as undefined object fields are absent from JSON output. Capture diagnostics belong on stderr. Normal output reports what was saved and summarizes skipped sources; detailed diagnostics are available explicitly. This supersedes the original proposal's inclusion of capture omission records in new capture documents.
+
+## Generation default clarification: 2026-11-12
+
+Generate supported settings by default, omitting complete unsupported top-level settings with a brief summary. The ordinary command must produce the useful artifact without requiring --skip-unsupported. Detailed diagnostics remain opt-in. --strict explicitly requests failure before output when unsupported settings exist. Invalid KDL and output errors still fail.

@@ -30,6 +30,12 @@ fn date(value: &str) -> Value {
     Value::Date(plist::Date::from_xml_format(value).unwrap())
 }
 
+fn strict_options() -> GenerateOptions {
+    GenerateOptions {
+        skip_unsupported: false,
+    }
+}
+
 fn rendered(document: &Document) -> Generated {
     generate(document, GenerateOptions::default()).unwrap()
 }
@@ -300,7 +306,7 @@ fn dates_are_24_hour_utc_and_fractional_dates_are_never_truncated() {
     for text in ["2026-10-30T15:04:05.000000001Z", "1969-12-31T23:59:59.25Z"] {
         for value in [date(text), array([date(text)])] {
             let document = document([("fraction", value)]);
-            let error = generate(&document, GenerateOptions::default()).unwrap_err();
+            let error = generate(&document, strict_options()).unwrap_err();
             assert!(error.to_string().contains("fractional-second date"));
             let partial = partial(&document);
             assert_eq!(partial.diagnostics.len(), 1);
@@ -316,7 +322,7 @@ fn library_created_unformattable_dates_get_errors_without_panics() {
         UNIX_EPOCH - Duration::from_secs(62_167_219_201),
     ] {
         let document = document([("date", Value::Date(time.into()))]);
-        let error = generate(&document, GenerateOptions::default()).unwrap_err();
+        let error = generate(&document, strict_options()).unwrap_err();
         assert!(matches!(error, Error::Invalid(_)));
         assert!(error.to_string().contains("RFC 3339 year range"));
     }
@@ -348,7 +354,7 @@ fn unsupported_types_skip_whole_top_level_keys_and_account_for_each() {
         ("valid", Value::String("keep".into())),
         ("valid-typed", array([Value::Boolean(true)])),
     ]);
-    let error = generate(&document, GenerateOptions::default()).unwrap_err();
+    let error = generate(&document, strict_options()).unwrap_err();
     let Error::Unsupported(failures) = error else {
         panic!("expected unsupported settings")
     };
@@ -394,7 +400,7 @@ fn fractional_and_large_integer_rejection_is_recursive_in_xml() {
             ("nested", nested),
             ("retained", array([Value::Boolean(false)])),
         ]);
-        assert!(generate(&document, GenerateOptions::default()).is_err());
+        assert!(generate(&document, strict_options()).is_err());
         let output = partial(&document);
         assert_eq!(output.diagnostics.len(), 1);
         assert!(output.diagnostics[0].contains("[\"array\"][0][\"bad\"]"));
@@ -420,7 +426,7 @@ fn controls_use_openstep_when_possible_and_diagnose_required_xml() {
         ("control", control.clone()),
         ("typed", array([Value::Boolean(true)])),
     ]);
-    assert!(generate(&xml, GenerateOptions::default()).is_err());
+    assert!(generate(&xml, strict_options()).is_err());
     let output = partial(&xml);
     assert_eq!(output.diagnostics.len(), 1);
     assert!(output.diagnostics[0].contains("forbidden in the required XML"));
@@ -452,7 +458,7 @@ fn nul_keys_and_values_are_never_rendered() {
         Value::Dict([("bad\0key".into(), Value::String("value".into()).into())].into()),
     ] {
         let document = document([("bad", value)]);
-        assert!(generate(&document, GenerateOptions::default()).is_err());
+        assert!(generate(&document, strict_options()).is_err());
         let output = partial(&document);
         assert_eq!(output.diagnostics.len(), 1);
         assert!(!output.script.contains('\0'));
@@ -466,7 +472,7 @@ fn nul_keys_and_values_are_never_rendered() {
         .into(),
         ..Document::default()
     };
-    assert!(generate(&document, GenerateOptions::default()).is_err());
+    assert!(generate(&document, strict_options()).is_err());
     assert!(!partial(&document).script.contains('\0'));
 }
 
@@ -581,7 +587,7 @@ fn unsupported_scope_combinations_name_each_top_level_key() {
             .into(),
             ..Document::default()
         };
-        assert!(generate(&document, GenerateOptions::default()).is_err());
+        assert!(generate(&document, strict_options()).is_err());
         let output = partial(&document);
         assert_eq!(output.diagnostics.len(), 2);
         assert!(
@@ -616,10 +622,7 @@ fn unsafe_domain_container_and_key_flags_are_rejected() {
             domains: [(Domain::user(name), properties([("key", Value::Integer(1))]))].into(),
             ..Document::default()
         };
-        assert!(
-            generate(&document, GenerateOptions::default()).is_err(),
-            "{name:?}"
-        );
+        assert!(generate(&document, strict_options()).is_err(), "{name:?}");
         match generate(
             &document,
             GenerateOptions {
@@ -646,12 +649,12 @@ fn unsafe_domain_container_and_key_flags_are_rejected() {
             domains: [(domain, properties([("key", Value::Integer(1))]))].into(),
             ..Document::default()
         };
-        assert!(generate(&document, GenerateOptions::default()).is_err());
+        assert!(generate(&document, strict_options()).is_err());
         assert!(!partial(&document).script.contains("/usr/bin/defaults"));
     }
     for value in [Value::String("value".into()), array([Value::Boolean(true)])] {
         let document = document([("-g", value)]);
-        assert!(generate(&document, GenerateOptions::default()).is_err());
+        assert!(generate(&document, strict_options()).is_err());
         assert!(!partial(&document).script.contains("/usr/bin/defaults"));
     }
 }
@@ -770,7 +773,7 @@ fn power_unknown_profiles_keys_types_and_ranges_are_diagnostic() {
         .into(),
         ..Document::default()
     };
-    assert!(generate(&document, GenerateOptions::default()).is_err());
+    assert!(generate(&document, strict_options()).is_err());
     let output = partial(&document);
     assert_eq!(output.diagnostics.len(), 11);
     let commands = output
@@ -826,7 +829,7 @@ fn generation_validates_library_created_documents_before_returning_output() {
     ] {
         let document = document([("out-of-range", value)]);
         assert!(matches!(
-            generate(&document, GenerateOptions::default()),
+            generate(&document, strict_options()),
             Err(Error::Invalid(_))
         ));
         assert!(matches!(
@@ -844,10 +847,7 @@ fn generation_validates_library_created_documents_before_returning_output() {
         nested = array([nested]);
     }
     assert!(matches!(
-        generate(
-            &document([("too-deep", nested)]),
-            GenerateOptions::default()
-        ),
+        generate(&document([("too-deep", nested)]), strict_options()),
         Err(Error::Invalid(_))
     ));
 }
@@ -899,8 +899,7 @@ fn tcp_keepalive_preserves_profiles_and_rejects_non_boolean_values() {
             .get_mut("battery")
             .unwrap()
             .insert("tcpkeepalive".into(), Value::Integer(value).into());
-        let Error::Unsupported(failures) = generate(&invalid, Default::default()).unwrap_err()
-        else {
+        let Error::Unsupported(failures) = generate(&invalid, strict_options()).unwrap_err() else {
             panic!("expected unsupported power value")
         };
         assert!(failures.diagnostics[0].contains("0 or 1"));
@@ -917,7 +916,7 @@ fn generation_counts_top_level_settings_once_per_reason_and_distinguishes_empty_
         ("valid", Value::Boolean(true)),
     ]);
     doc.power.insert("unknown".into(), Default::default());
-    let Error::Unsupported(failures) = generate(&doc, Default::default()).unwrap_err() else {
+    let Error::Unsupported(failures) = generate(&doc, strict_options()).unwrap_err() else {
         panic!("expected unsupported settings")
     };
     assert_eq!(failures.settings, 1);
@@ -943,4 +942,36 @@ fn generation_counts_top_level_settings_once_per_reason_and_distinguishes_empty_
             .script
             .contains(" write 'com.example.render' 'mixed'")
     );
+}
+
+#[test]
+fn default_generation_preserves_supported_settings_and_skips_whole_unsupported_values() {
+    let doc = document([
+        ("keep", Value::Boolean(true)),
+        (
+            "unsupported",
+            array([
+                Value::String("whole setting is omitted".into()),
+                Value::Uid(7),
+            ]),
+        ),
+    ]);
+    let original = doc.clone();
+    let output = generate(&doc, GenerateOptions::default()).unwrap();
+    assert_eq!(output, partial(&doc));
+    assert_eq!(output.settings, 1);
+    assert_eq!(output.unsupported.settings, 1);
+    assert!(output.script.contains("'keep' -bool 'TRUE'"));
+    assert!(!output.script.contains("whole setting is omitted"));
+    assert_eq!(doc, original);
+    assert!(matches!(
+        generate(&doc, strict_options()),
+        Err(Error::Unsupported(_))
+    ));
+
+    let unsupported_only = document([("unsupported", Value::Uid(7))]);
+    let output = generate(&unsupported_only, GenerateOptions::default()).unwrap();
+    assert_eq!(output.settings, 0);
+    assert_eq!(output.unsupported.settings, 1);
+    assert!(!output.script.contains("/usr/bin/defaults"));
 }

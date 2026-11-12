@@ -53,10 +53,12 @@ sudo /usr/bin/pmset -b 'displaysleep' '5'
 sudo /usr/bin/pmset -c 'displaysleep' '30'
 ~~~
 
-If retained settings have no supported mapping, generation fails before writing an artifact and prints a short count by reason. Add --verbose for per-setting details. To explicitly generate a partial file with every skipped setting named in script comments:
+Generation emits supported settings by default. Unsupported settings are skipped as complete top-level values and named in script comments. Add --verbose for per-setting details on stderr.
+
+Use --strict if unsupported settings should stop generation before any output:
 
 ~~~sh
-raskin generate myprefs.kdl --skip-unsupported -o partial.macos
+raskin generate myprefs.kdl --strict -o myprefs.macos
 ~~~
 
 After a successful write, generation reports the destination and number of generated settings. Partial output also summarizes skipped settings by reason; --verbose expands the details on stderr. Counts refer to top-level settings, including when a nested value is unsupported.

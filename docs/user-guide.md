@@ -38,7 +38,7 @@ Observed symlinks are refused, including ancestor paths. Use the real path when 
 
 Malformed KDL reports its source, line and column. Unsupported versions fail. Fix input before generating again.
 
-Unavailable capture sources are omitted from KDL. They do not block generating the settings that were captured. If a retained value has no faithful mapping, generation fails before writing and reports counts by reason. Generation --verbose expands the affected settings and nested paths. --skip-unsupported explicitly requests partial output with comments naming every skipped setting. A successful write reports its destination and number of generated settings, followed by a compact summary of any skips. Nothing is written automatically beside the script.
+Unavailable capture sources are omitted from KDL. They do not block generating the settings that were captured. Generation emits supported settings by default and skips complete top-level settings that have no faithful mapping. It reports counts by reason and names each skipped setting in script comments. Generation --verbose expands the affected settings and nested paths on stderr. A successful write reports its destination and number of generated settings, followed by a compact summary of any skips. Nothing is written automatically beside the script.
 
 Counts refer to top-level settings, not individual nested failures. A setting with several unsupported nested values counts once per reason; a note explains when reason counts overlap. Normal output shows the six most frequent reasons at most, with an additional count if more exist. --verbose includes all details. Unsupported empty domains/profiles and legacy capture omission records are reported separately.
 
@@ -46,7 +46,7 @@ Counts refer to top-level settings, not individual nested failures. A setting wi
 raskin generate myprefs.kdl --verbose -o myprefs.macos 2> generation.log
 ~~~
 
-The log is optional. Without --skip-unsupported, unsupported input returns nonzero and leaves both stdout and any existing output file untouched. With --skip-unsupported, only complete supported top-level settings are emitted.
+The log is optional. Default generation returns success after writing the supported settings. Use --strict to return nonzero before any output if an unsupported setting is found; stdout and any existing output file stay untouched. Invalid KDL and output errors always fail. The earlier --skip-unsupported option is still accepted for compatibility and has the same behavior as the default; it cannot be combined with --strict.
 
 --force replaces output atomically. It does not permit overwriting input, including via hard links or symlinks. A missing parent directory is an error.
 

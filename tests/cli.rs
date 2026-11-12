@@ -178,9 +178,7 @@ fn unknown_commands_and_short_long_help() {
         String::from_utf8_lossy(&spec.stderr)
     );
     let text = String::from_utf8(spec.stdout).unwrap();
-    assert!(
-        text.contains("capture") && text.contains("generate") && text.contains("skip-unsupported")
-    );
+    assert!(text.contains("capture") && text.contains("generate") && text.contains("strict"));
 }
 #[test]
 fn offline_capture_then_generate_uses_only_the_supplied_tree() {
@@ -364,14 +362,21 @@ fn unsupported_generation_input(dir: &Path) -> String {
 }
 
 #[test]
-fn generation_failure_summarizes_every_reason_and_expands_only_with_verbose() {
+fn strict_generation_failure_summarizes_every_reason_and_expands_only_with_verbose() {
     let tmp = temp();
     let dir = tmp.path();
     let saved = unsupported_generation_input(dir);
     fs::write(dir.join("keep.macos"), "existing output").unwrap();
     for output in ["failed.macos", "keep.macos"] {
         let result = cli(
-            &["generate", "unsupported.kdl", "-o", output, "--force"],
+            &[
+                "generate",
+                "unsupported.kdl",
+                "--strict",
+                "-o",
+                output,
+                "--force",
+            ],
             dir,
         );
         assert!(!result.status.success());
@@ -383,7 +388,7 @@ fn generation_failure_summarizes_every_reason_and_expands_only_with_verbose() {
         assert!(message.contains("1: fractional-second date"));
         assert!(message.contains("1: integer exceeds signed 64-bit"));
         assert!(message.contains("1: UID"));
-        assert!(message.contains("--verbose") && message.contains("--skip-unsupported"));
+        assert!(message.contains("--verbose") && message.contains("Omit --strict"));
         assert!(!message.contains("repeated-") && !message.contains("dates\"[511]"));
         assert!(
             message.lines().count() <= 10 && message.len() < 1200,
@@ -399,6 +404,7 @@ fn generation_failure_summarizes_every_reason_and_expands_only_with_verbose() {
         &[
             "generate",
             "unsupported.kdl",
+            "--strict",
             "--verbose",
             "-o",
             "verbose.macos",
@@ -411,7 +417,7 @@ fn generation_failure_summarizes_every_reason_and_expands_only_with_verbose() {
     let details = String::from_utf8(verbose.stderr).unwrap();
     assert!(details.starts_with("error: generation stopped; no output was written."));
     assert!(details.contains("repeated-255") && details.contains("dates\"[511]"));
-    let stdout = cli(&["generate", "unsupported.kdl"], dir);
+    let stdout = cli(&["generate", "unsupported.kdl", "--strict"], dir);
     assert!(!stdout.status.success() && stdout.stdout.is_empty());
     assert_eq!(
         saved,
@@ -420,20 +426,11 @@ fn generation_failure_summarizes_every_reason_and_expands_only_with_verbose() {
 }
 
 #[test]
-fn partial_generation_reports_saved_settings_concisely_and_keeps_stdout_clean() {
+fn default_generation_reports_saved_settings_concisely_and_keeps_stdout_clean() {
     let tmp = temp();
     let dir = tmp.path();
     unsupported_generation_input(dir);
-    let result = cli(
-        &[
-            "generate",
-            "unsupported.kdl",
-            "--skip-unsupported",
-            "-o",
-            "partial.macos",
-        ],
-        dir,
-    );
+    let result = cli(&["generate", "unsupported.kdl", "-o", "partial.macos"], dir);
     assert!(result.status.success() && result.stdout.is_empty());
     let message = String::from_utf8(result.stderr).unwrap();
     assert!(message.starts_with("Saved partial script to \"partial.macos\"."));
@@ -449,7 +446,7 @@ fn partial_generation_reports_saved_settings_concisely_and_keeps_stdout_clean() 
     assert!(text.contains("# Partial output: 259 unsupported items skipped."));
     assert!(text.contains("'keep' -string 'retained'"));
     assert!(text.contains("repeated-255") && text.contains("dates\"[511]"));
-    let stdout = cli(&["generate", "unsupported.kdl", "--skip-unsupported"], dir);
+    let stdout = cli(&["generate", "unsupported.kdl"], dir);
     assert!(stdout.status.success());
     assert_eq!(stdout.stdout, script);
     assert!(
@@ -457,10 +454,7 @@ fn partial_generation_reports_saved_settings_concisely_and_keeps_stdout_clean() 
             .unwrap()
             .starts_with("Wrote partial script to stdout.")
     );
-    let verbose = cli(
-        &["generate", "unsupported.kdl", "--skip-unsupported", "-v"],
-        dir,
-    );
+    let verbose = cli(&["generate", "unsupported.kdl", "-v"], dir);
     assert!(verbose.status.success());
     assert_eq!(verbose.stdout, script);
     let details = String::from_utf8(verbose.stderr).unwrap();
@@ -475,14 +469,7 @@ fn generation_write_failure_does_not_claim_success_or_dump_skip_details() {
     fs::write(dir.join("exists.macos"), "keep me").unwrap();
     for output in ["exists.macos", "missing/output.macos"] {
         let result = cli(
-            &[
-                "generate",
-                "unsupported.kdl",
-                "--skip-unsupported",
-                "--verbose",
-                "-o",
-                output,
-            ],
+            &["generate", "unsupported.kdl", "--verbose", "-o", output],
             dir,
         );
         assert!(!result.status.success() && result.stdout.is_empty());
@@ -524,4 +511,38 @@ fn legacy_capture_records_are_summarized_during_generation() {
             .unwrap()
             .contains("fixture:missing")
     );
+}
+
+#[test]
+fn old_skip_flag_matches_the_default_and_conflicts_with_strict() {
+    let tmp = temp();
+    let dir = tmp.path();
+    unsupported_generation_input(dir);
+    let default = cli(&["generate", "unsupported.kdl"], dir);
+    let legacy = cli(&["generate", "unsupported.kdl", "--skip-unsupported"], dir);
+    assert!(default.status.success() && legacy.status.success());
+    assert_eq!(default.stdout, legacy.stdout);
+    assert_eq!(default.stderr, legacy.stderr);
+    for flags in [
+        ["--strict", "--skip-unsupported"],
+        ["--skip-unsupported", "--strict"],
+    ] {
+        let result = cli(
+            &[
+                "generate",
+                "unsupported.kdl",
+                flags[0],
+                flags[1],
+                "-o",
+                "conflict.macos",
+            ],
+            dir,
+        );
+        assert!(!result.status.success() && result.stdout.is_empty());
+        assert!(!dir.join("conflict.macos").exists());
+    }
+    let help = cli(&["generate", "--help"], dir);
+    assert!(help.status.success());
+    let text = String::from_utf8(help.stdout).unwrap();
+    assert!(text.contains("--strict") && !text.contains("--skip-unsupported"));
 }

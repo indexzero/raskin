@@ -10,10 +10,18 @@ use report::Issue;
 use crate::model::power_key_supported;
 use crate::{Document, Domain, Error, Host, Result, Scope, Setting, Value};
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 pub struct GenerateOptions {
-    /// Omit complete unsupported top-level settings and name each omission.
+    /// Omit complete unsupported top-level settings and name each omission (default: true).
     pub skip_unsupported: bool,
+}
+
+impl Default for GenerateOptions {
+    fn default() -> Self {
+        Self {
+            skip_unsupported: true,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
