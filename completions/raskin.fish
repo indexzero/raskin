@@ -20,7 +20,8 @@ Examples:
   raskin capture --preset input -o input.kdl
   raskin capture --from ./saved-inputs -o saved.kdl
 """# {
-    long_help "Read explicit persisted user, host, system and container preferences plus native power profiles. Unsupported or unreadable sources are recorded. No settings are changed. With --from, only the supplied offline tree is read; there is no live fallback."
+    long_help "Read explicit persisted user, host, system and container preferences plus native power profiles. Unavailable settings are omitted from KDL; capture diagnostics go to stderr. No settings are changed. With --from, only the supplied offline tree is read; there is no live fallback."
+    flag "-v --verbose" help="Show per-source capture diagnostics on stderr"
     flag --preset help="Capture broad settings or a curated subset" default=broad {
         arg <PRESET> {
             choices broad desktop input power

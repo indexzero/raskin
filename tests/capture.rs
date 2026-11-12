@@ -139,8 +139,7 @@ fn simple() -> Vec<u8> {
 }
 fn omitted(report: &CaptureReport, source: &str, reason: Reason) -> bool {
     report
-        .document
-        .unavailable
+        .omissions
         .iter()
         .any(|entry| entry.source == source && entry.reason == reason)
 }
@@ -354,7 +353,7 @@ fn desktop_preset_includes_exact_keys_and_retains_current_host_scope() {
         ])
     );
     assert!(report.document.power.is_empty());
-    assert!(report.document.unavailable.is_empty());
+    assert!(report.omissions.is_empty());
     assert!(diagnostic(&report, "included 17 keys; filtered 6 keys"));
     assert!(diagnostic(&report, "system and container stores"));
 }
@@ -393,7 +392,7 @@ fn input_preset_includes_exact_keys_without_container_or_system_values() {
         ])
     );
     assert!(report.document.power.is_empty());
-    assert!(report.document.unavailable.is_empty());
+    assert!(report.omissions.is_empty());
     assert!(diagnostic(&report, "included 12 keys; filtered 5 keys"));
 }
 
@@ -404,7 +403,7 @@ fn power_preset_reads_only_power_and_presets_do_not_report_excluded_providers_fa
     assert_eq!(reader.reads.borrow().as_slice(), &["pmset"]);
     assert!(report.document.domains.is_empty());
     assert_eq!(report.document.power.len(), 2);
-    assert!(report.document.unavailable.is_empty());
+    assert!(report.omissions.is_empty());
     let report = capture_offline(&fixture_root(), Preset::Power).unwrap();
     assert_eq!(
         report
@@ -428,7 +427,7 @@ fn power_preset_reads_only_power_and_presets_do_not_report_excluded_providers_fa
         let reader = MockReader::default();
         let report = capture_with_reader(&reader, preset).unwrap();
         assert_eq!(reader.reads.borrow().as_slice(), &["dir:user"]);
-        assert!(report.document.unavailable.is_empty());
+        assert!(report.omissions.is_empty());
         assert!(diagnostic(&report, "exclusions:"));
     }
 }
@@ -528,8 +527,7 @@ fn non_dictionary_and_empty_plists_do_not_invent_values() {
     assert!(diagnostic(&report, "empty preference dictionary"));
     assert!(
         !report
-            .document
-            .unavailable
+            .omissions
             .iter()
             .any(|entry| entry.source == "defaults:user/com.example.empty.plist")
     );
@@ -745,8 +743,7 @@ fn malformed_and_duplicate_power_reject_the_affected_profile() {
         );
         assert!(
             report
-                .document
-                .unavailable
+                .omissions
                 .iter()
                 .any(|entry| entry.reason == Reason::ReadFailed)
         );
@@ -876,4 +873,69 @@ fn filesystem_symlinks_are_refused_at_file_directory_root_and_ancestor_levels() 
         "defaults:user/ByHost",
         Reason::Unsupported
     ));
+}
+
+#[test]
+fn native_power_labels_do_not_discard_battery_and_charger_settings() {
+    let report = MockReader::power_report(include_str!("fixtures/capture/pmset-labels.txt"));
+    assert_eq!(report.document.power.len(), 2);
+    assert_eq!(
+        report.document.power["battery"]["displaysleep"].value,
+        Value::Integer(7)
+    );
+    assert_eq!(
+        report.document.power["charger"]["displaysleep"].value,
+        Value::Integer(42)
+    );
+    assert_eq!(
+        report.document.power["battery"]["lowpowermode"].value,
+        Value::Integer(1)
+    );
+    assert_eq!(
+        report.document.power["charger"]["tcpkeepalive"].value,
+        Value::Integer(0)
+    );
+    for source in [
+        "pmset:battery/Sleep On Power Button",
+        "pmset:charger/Sleep On Power Button",
+        "pmset:charger/Future Read Only Label",
+        "pmset:battery/hibernatefile",
+        "pmset:battery/networkoversleep",
+    ] {
+        assert!(omitted(&report, source, Reason::Unsupported), "{source}");
+    }
+    assert!(
+        !report
+            .omissions
+            .iter()
+            .any(|entry| entry.reason == Reason::ReadFailed)
+    );
+    assert!(report.document.unavailable.is_empty());
+    let kdl = raskin::codec::encode(&report.document).unwrap();
+    assert!(!kdl.contains("unavailable") && !kdl.contains("Sleep On Power Button"));
+    let decoded = raskin::codec::decode(&kdl, "synthetic-power.kdl").unwrap();
+    assert_eq!(decoded, report.document);
+    let script = raskin::render::generate(&decoded, Default::default())
+        .unwrap()
+        .script;
+    assert!(script.contains("/usr/bin/pmset -b 'displaysleep' '7'"));
+    assert!(script.contains("/usr/bin/pmset -c 'displaysleep' '42'"));
+    assert!(script.contains("/usr/bin/pmset -b 'lowpowermode' '1'"));
+    assert!(script.contains("/usr/bin/pmset -c 'tcpkeepalive' '0'"));
+    assert!(!script.contains("Sleep On Power Button"));
+    // The script is text only. Never execute it.
+}
+
+#[test]
+fn duplicate_native_display_labels_still_reject_ambiguous_profiles() {
+    let report = MockReader::power_report(
+        "Battery Power:\n Sleep On Power Button 1\n Sleep On Power Button 0\n displaysleep 7\nAC Power:\n displaysleep 42\n",
+    );
+    assert!(!report.document.power.contains_key("battery"));
+    assert_eq!(
+        report.document.power["charger"]["displaysleep"].value,
+        Value::Integer(42)
+    );
+    assert!(omitted(&report, "pmset:battery", Reason::ReadFailed));
+    assert!(diagnostic(&report, "duplicate power key"));
 }

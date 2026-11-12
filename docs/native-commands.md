@@ -26,3 +26,5 @@ Generation rejects UIDs, nonfinite reals, integers above signed 64-bit range, fr
 Tests inspect shell text and parse native data. They never execute commands. Rust plist 1.10.3's ASCII parser does not recognize native data tokens. OpenStep bytes therefore have exact text fixtures and primary-source evidence, not a claimed parser round trip. XML data and string-only OpenStep structures have parser round trips.
 
 This evidence establishes artifacts, not successful application on a live Mac.
+
+The writable power mappings also include lowpowermode (battery/charger) and tcpkeepalive, restricted to 0/1. Apple's [pmset source](https://github.com/apple-oss-distributions/PowerManagement/blob/main/pmset/pmset.m) identifies these native fields and Boolean values. Sleep On Power Button is a display label, not a guessed command argument. The installed manual describes changing networkoversleep as unsupported; it remains omitted. No hibernatefile path mapping is introduced.

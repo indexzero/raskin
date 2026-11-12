@@ -281,13 +281,14 @@ pub struct Unavailable {
     pub reason: Reason,
 }
 
-/// Keys documented as writable by pmset(1); unknown/read-only fields never emit commands.
+/// Keys verified in pmset(1) or Apple's pmset source; unknown/read-only fields never emit commands.
 pub fn power_key_supported(profile: &str, key: &str) -> bool {
     if !matches!(profile, "battery" | "charger" | "ups") {
         return false;
     }
     match key {
         "haltlevel" | "haltafter" | "haltremain" => profile == "ups",
+        "lowpowermode" => profile != "ups",
         "displaysleep"
         | "disksleep"
         | "sleep"
@@ -304,6 +305,7 @@ pub fn power_key_supported(profile: &str, key: &str) -> bool {
         | "sms"
         | "hibernatemode"
         | "ttyskeepawake"
+        | "tcpkeepalive"
         | "destroyfvkeyonstandby"
         | "standby"
         | "standbydelayhigh"

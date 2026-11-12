@@ -219,3 +219,115 @@ fn offline_capture_then_generate_uses_only_the_supplied_tree() {
     assert!(text.contains("org.example.fixture"));
     assert!(text.contains("-b") && text.contains("-c"));
 }
+
+fn capture_tree(dir: &Path, power: &str) {
+    fs::create_dir_all(dir.join("source/user")).unwrap();
+    fs::write(dir.join("source/user/org.example.fixture.plist"),
+        r#"<?xml version="1.0"?><plist version="1.0"><dict><key>enabled</key><true/></dict></plist>"#).unwrap();
+    fs::write(
+        dir.join("source/host-id.txt"),
+        "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE\n",
+    )
+    .unwrap();
+    fs::write(dir.join("source/pmset.txt"), power).unwrap();
+}
+
+#[test]
+fn capture_reports_partial_success_concisely_and_keeps_diagnostics_out_of_kdl() {
+    let tmp = temp();
+    let dir = tmp.path().canonicalize().unwrap();
+    capture_tree(&dir, include_str!("fixtures/capture/pmset-labels.txt"));
+    for number in 0..200 {
+        fs::write(
+            dir.join(format!("source/user/skipped-{number}.txt")),
+            "synthetic non-preference",
+        )
+        .unwrap();
+    }
+    let normal = cli(&["capture", "--from", "source", "-o", "normal.kdl"], &dir);
+    assert!(normal.status.success());
+    assert!(normal.stdout.is_empty());
+    let summary = String::from_utf8(normal.stderr).unwrap();
+    assert!(summary.starts_with("Saved partial capture to \"normal.kdl\"."));
+    assert!(summary.contains("power profiles: battery, charger"));
+    assert!(summary.contains("Skipped sources/fields:") && summary.contains("--verbose"));
+    assert!(summary.lines().count() <= 5, "{summary}");
+    assert!(!summary.contains("skipped-199.txt"));
+    let saved = fs::read_to_string(dir.join("normal.kdl")).unwrap();
+    assert!(!saved.contains("unavailable") && !saved.contains("skipped-"));
+    let document = codec::decode(&saved, "normal.kdl").unwrap();
+    assert_eq!(document.domains.len(), 1);
+    assert_eq!(document.power.len(), 2);
+    assert!(document.unavailable.is_empty());
+
+    let verbose = cli(
+        &[
+            "capture",
+            "--from",
+            "source",
+            "--verbose",
+            "-o",
+            "verbose.kdl",
+        ],
+        &dir,
+    );
+    assert!(verbose.status.success());
+    assert_eq!(saved, fs::read_to_string(dir.join("verbose.kdl")).unwrap());
+    let details = String::from_utf8(verbose.stderr).unwrap();
+    assert!(details.starts_with("Saved partial capture"));
+    assert!(details.contains("skipped-199.txt"));
+    assert!(details.contains("Sleep On Power Button"));
+    assert!(details.lines().count() > 200);
+
+    let stdout = cli(&["capture", "--from", "source"], &dir);
+    assert!(stdout.status.success());
+    assert_eq!(stdout.stdout, saved.as_bytes());
+    assert!(
+        String::from_utf8(stdout.stderr)
+            .unwrap()
+            .starts_with("Wrote partial capture to stdout.")
+    );
+}
+
+#[test]
+fn failed_capture_write_does_not_claim_that_a_capture_was_saved() {
+    let tmp = temp();
+    let dir = tmp.path().canonicalize().unwrap();
+    capture_tree(&dir, "Battery Power:\n displaysleep 7\n");
+    fs::write(dir.join("exists.kdl"), "keep me").unwrap();
+    for output in ["exists.kdl", "missing/output.kdl"] {
+        let result = cli(&["capture", "--from", "source", "-o", output], &dir);
+        assert!(!result.status.success());
+        let message = String::from_utf8(result.stderr).unwrap();
+        assert!(message.starts_with("error:"), "{message}");
+        assert!(!message.contains("Saved") && !message.contains("Captured"));
+        assert!(result.stdout.is_empty());
+    }
+    assert_eq!(
+        fs::read_to_string(dir.join("exists.kdl")).unwrap(),
+        "keep me"
+    );
+}
+
+#[test]
+fn failed_power_profile_remains_visible_in_the_short_capture_summary() {
+    let tmp = temp();
+    let dir = tmp.path().canonicalize().unwrap();
+    capture_tree(
+        &dir,
+        "Battery Power:\n displaysleep invalid\nAC Power:\n displaysleep 42\n",
+    );
+    let result = cli(&["capture", "--from", "source", "-o", "partial.kdl"], &dir);
+    assert!(result.status.success());
+    let message = String::from_utf8(result.stderr).unwrap();
+    assert!(message.contains("Saved partial capture"));
+    assert!(message.contains("power profiles: charger"));
+    assert!(message.contains("Power profiles not captured: battery."));
+    assert!(message.contains("read failures"));
+    assert!(message.lines().count() <= 6);
+    let saved = fs::read_to_string(dir.join("partial.kdl")).unwrap();
+    let doc = codec::decode(&saved, "partial.kdl").unwrap();
+    assert!(!doc.power.contains_key("battery"));
+    assert_eq!(doc.power.len(), 1);
+    assert!(doc.unavailable.is_empty());
+}

@@ -1,6 +1,6 @@
 # Capture presets
 
-Broad is the default and has no curated preference-key filter. It reads supported stores and records unsupported or unreadable sources.
+Broad is the default and has no curated preference-key filter. It reads supported stores and reports unsupported or unreadable sources on stderr.
 
 The three curated presets preserve captured values. They do not substitute recommended values. Desktop and input include matching user/any-host and user/current-host preferences, but exclude system and container stores.
 
@@ -16,6 +16,6 @@ The three curated presets preserve captured values. They do not substitute recom
 
 Desktop excludes screenshot paths, Dock tiles, application state, and power. Input excludes unrelated global preferences. Power reads no preference files. Curated presets exclude unrelated dedicated providers rather than label them failed.
 
-Power support depends on destination hardware and macOS. Unknown/read-only fields and unsupported non-integer fields are recorded as unavailable. Generation validates documented mappings and ranges.
+Power support depends on destination hardware and macOS. Unknown/read-only fields and unsupported non-integer fields are omitted from saved KDL and reported in diagnostics. Generation validates documented mappings and ranges.
 
-Diagnostics identify the preset, included key count, filtered keys within selected domains, and excluded discovered sources. KDL remains usable without the preset implementation. Exact selections are tested in [capture fixtures](../tests/capture.rs).
+The default summary identifies captured counts and power profiles. Verbose diagnostics identify the preset, included key count, filtered keys within selected domains, and excluded discovered sources. KDL remains usable without the preset implementation. Exact selections are tested in [capture fixtures](../tests/capture.rs).

@@ -876,3 +876,48 @@ fn repeated_generation_is_deterministic_and_does_not_mutate_input() {
     }
     assert_eq!(document, original);
 }
+
+#[test]
+fn common_power_booleans_preserve_profiles_and_reject_non_boolean_values() {
+    let mut doc = Document::default();
+    doc.power.insert(
+        "battery".into(),
+        properties([
+            ("lowpowermode", Value::Integer(1)),
+            ("tcpkeepalive", Value::Integer(1)),
+        ]),
+    );
+    doc.power.insert(
+        "charger".into(),
+        properties([
+            ("lowpowermode", Value::Integer(0)),
+            ("tcpkeepalive", Value::Integer(0)),
+        ]),
+    );
+    let script = rendered(&doc).script;
+    assert!(script.contains("/usr/bin/pmset -b 'lowpowermode' '1'"));
+    assert!(script.contains("/usr/bin/pmset -c 'lowpowermode' '0'"));
+    assert!(script.contains("/usr/bin/pmset -b 'tcpkeepalive' '1'"));
+    assert!(script.contains("/usr/bin/pmset -c 'tcpkeepalive' '0'"));
+    for key in ["lowpowermode", "tcpkeepalive"] {
+        for value in [-1, 2] {
+            let mut invalid = doc.clone();
+            invalid
+                .power
+                .get_mut("battery")
+                .unwrap()
+                .insert(key.into(), Value::Integer(value).into());
+            assert!(
+                generate(&invalid, Default::default())
+                    .unwrap_err()
+                    .to_string()
+                    .contains("0 or 1")
+            );
+        }
+    }
+    doc.power.insert(
+        "ups".into(),
+        properties([("lowpowermode", Value::Integer(1))]),
+    );
+    assert!(generate(&doc, Default::default()).is_err());
+}

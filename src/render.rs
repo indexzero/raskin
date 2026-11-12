@@ -494,6 +494,8 @@ fn power_value_issue(key: &str, value: &Value) -> Option<String> {
         | "halfdim"
         | "sms"
         | "ttyskeepawake"
+        | "tcpkeepalive"
+        | "lowpowermode"
         | "destroyfvkeyonstandby"
         | "standby"
         | "autopoweroff" => {

@@ -1,0 +1,20 @@
+Battery Power:
+ Sleep On Power Button 1
+ lowpowermode         1
+ standby              1
+ hibernatefile        /var/vm/sleepimage
+ displaysleep         7
+ womp                 0
+ networkoversleep     0
+ sleep                3
+ tcpkeepalive         1
+ disksleep            12
+AC Power:
+ Sleep On Power Button 1
+ lowpowermode         0
+ Future Read Only Label 9
+ displaysleep         42
+ womp                 1
+ sleep                0
+ tcpkeepalive         0
+ disksleep            8

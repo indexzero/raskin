@@ -37,7 +37,7 @@ raskin capture --preset input -o input.kdl
 raskin capture --preset power -o power.kdl
 ~~~
 
-[Presets](docs/presets.md) define the exact selections. Broad capture is the default. Permission failures, unsupported stores, and other omissions are recorded in KDL rather than hidden.
+[Presets](docs/presets.md) define the exact selections. Broad capture is the default. KDL contains only captured settings. Unavailable values are omitted, like undefined object fields in JSON. Capture reports the saved file, captured counts, power profiles, and a compact summary of skipped sources on stderr. Add --verbose for per-source diagnostics.
 
 Generate from the synthetic example without reading this Mac:
 

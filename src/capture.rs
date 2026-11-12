@@ -112,7 +112,10 @@ impl FromStr for Preset {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct CaptureReport {
+    /// Captured settings only; failed reads never become preference nodes.
     pub document: Document,
+    /// Capture bookkeeping for callers, never serialized into the document.
+    pub omissions: Vec<Unavailable>,
     pub diagnostics: Vec<String>,
 }
 
@@ -192,6 +195,7 @@ pub fn capture_with_reader(reader: &impl CaptureReader, preset: Preset) -> Resul
         reader,
         preset,
         document: Document::default(),
+        omissions: Vec::new(),
         diagnostics: Vec::new(),
         host: None,
         host_attempted: false,
@@ -221,8 +225,8 @@ pub fn capture_with_reader(reader: &impl CaptureReader, preset: Preset) -> Resul
         Preset::Power => capture.power(),
     }
     capture.document.validate()?;
-    capture.document.unavailable.sort();
-    capture.document.unavailable.dedup();
+    capture.omissions.sort();
+    capture.omissions.dedup();
     let included = capture
         .document
         .domains
@@ -247,6 +251,7 @@ pub fn capture_with_reader(reader: &impl CaptureReader, preset: Preset) -> Resul
     capture.diagnostics.push(format!("preset {preset}: included {included} keys; filtered {} keys in selected domains; intentionally excluded {} discovered sources; exclusions: {exclusions}", capture.filtered_keys, capture.excluded_sources));
     Ok(CaptureReport {
         document: capture.document,
+        omissions: capture.omissions,
         diagnostics: capture.diagnostics,
     })
 }
@@ -279,6 +284,7 @@ struct Capture<'a, R> {
     reader: &'a R,
     preset: Preset,
     document: Document,
+    omissions: Vec<Unavailable>,
     diagnostics: Vec<String>,
     host: Option<String>,
     host_attempted: bool,
@@ -290,9 +296,7 @@ impl<R: CaptureReader> Capture<'_, R> {
     fn unavailable(&mut self, source: String, reason: Reason, detail: impl fmt::Display) {
         self.diagnostics
             .push(format!("{source}: {}: {detail}", reason.as_str()));
-        self.document
-            .unavailable
-            .push(Unavailable { source, reason });
+        self.omissions.push(Unavailable { source, reason });
     }
     fn read_error(&mut self, source: String, error: io::Error) {
         let reason = match error.kind() {
@@ -651,11 +655,15 @@ impl<R: CaptureReader> Capture<'_, R> {
                 continue;
             };
             let parts: Vec<_> = line.split_whitespace().collect();
-            if parts.len() != 2
-                || parts[0].is_empty()
-                || !parts[0]
-                    .bytes()
-                    .all(|c| c.is_ascii_alphanumeric() || c == b'_')
+            // Native output can contain display labels such as "Sleep On Power
+            // Button". Account for those unsupported fields without discarding
+            // the valid settings beside them. Extra tokens on a known command
+            // key are still malformed, not an invented display label.
+            if parts.len() < 2
+                || !parts[..parts.len() - 1]
+                    .iter()
+                    .all(|part| part.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_'))
+                || (parts.len() != 2 && power_key_supported(profile, parts[0]))
             {
                 invalid.insert(profile.clone());
                 self.unavailable(
@@ -665,7 +673,7 @@ impl<R: CaptureReader> Capture<'_, R> {
                 );
                 continue;
             }
-            let key = parts[0];
+            let key = parts[..parts.len() - 1].join(" ");
             if !keys
                 .entry(profile.clone())
                 .or_default()
@@ -679,7 +687,7 @@ impl<R: CaptureReader> Capture<'_, R> {
                 );
                 continue;
             }
-            if !power_key_supported(profile, key) {
+            if !power_key_supported(profile, &key) {
                 self.unavailable(
                     format!("pmset:{profile}/{key}"),
                     Reason::Unsupported,
@@ -687,7 +695,7 @@ impl<R: CaptureReader> Capture<'_, R> {
                 );
                 continue;
             }
-            let Ok(value) = parts[1].parse::<i64>() else {
+            let Ok(value) = parts[parts.len() - 1].parse::<i64>() else {
                 invalid.insert(profile.clone());
                 self.unavailable(
                     format!("pmset:{profile}/{key}"),
@@ -720,7 +728,11 @@ impl<R: CaptureReader> Capture<'_, R> {
         }
         for profile in invalid {
             profiles.remove(&profile);
-            self.diagnostics.push(format!("pmset:{profile}: rejected the complete profile because its data is ambiguous or malformed"));
+            self.unavailable(
+                format!("pmset:{profile}"),
+                Reason::ReadFailed,
+                "rejected the complete profile because its data is ambiguous or malformed",
+            );
         }
         self.document.power = profiles;
     }

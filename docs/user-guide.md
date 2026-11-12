@@ -25,7 +25,7 @@ saved-inputs/
 
 The user and system directories stand for Library/Preferences. Each containers child stands for that app's Data/Library/Preferences directory. Optional group-containers children account for unsupported stores; their contents are not read.
 
-host-id.txt contains one source UUID. pmset.txt contains native pmset -g custom output with explicit profile headings. Missing/malformed inputs are recorded. There is no fallback to the current machine.
+host-id.txt contains one source UUID. pmset.txt contains native pmset -g custom output with explicit profile headings. Missing/malformed inputs are reported in capture diagnostics. There is no fallback to the current machine.
 
 ~~~sh
 raskin capture --from saved-inputs -o saved.kdl
@@ -38,11 +38,19 @@ Observed symlinks are refused, including ancestor paths. Use the real path when 
 
 Malformed KDL reports its source, line and column. Unsupported versions fail. Fix input before generating again.
 
-Unavailable capture sources remain in KDL. They do not block generating captured settings. If a retained value has no faithful mapping, generation fails before writing. --skip-unsupported requests partial output with comments and diagnostics naming every skipped setting.
+Unavailable capture sources are omitted from KDL. They do not block generating the settings that were captured. If a retained value has no faithful mapping, generation fails before writing. --skip-unsupported requests partial output with comments and diagnostics naming every skipped setting.
 
 --force replaces output atomically. It does not permit overwriting input, including via hard links or symlinks. A missing parent directory is an error.
 
-Stdout contains only the artifact or usage specification. Diagnostics use stderr. Success returns zero; invalid input/output failures return nonzero. A successful capture can still have unavailable records. Inspect these and the coverage notes.
+Stdout contains only the artifact or usage specification. Diagnostics use stderr. Success returns zero; invalid input/output failures return nonzero. After a successful write, capture reports the destination, captured setting count, and power profiles. A partial capture also summarizes skipped sources by reason. Per-source details require --verbose. Capture diagnostics are not saved as preference nodes or an automatic sidecar.
+
+~~~sh
+raskin capture --verbose -o myprefs.kdl 2> capture.log
+~~~
+
+The redirected log is optional. A write failure returns nonzero and does not print a success summary. Rejected power profiles remain visible even without --verbose.
+
+Permission-denied sources remain unreadable until access is available. macOS privacy controls can require Full Disk Access for the terminal application running Raskin; ordinary file permissions can also deny reads. Raskin does not change those permissions or retry with elevated privileges. See Apple's [file-access controls](https://support.apple.com/guide/security/controlling-app-access-to-files-secddd1d86a6/web) and the [coverage matrix](coverage.md).
 
 ## Comparison and handoff
 

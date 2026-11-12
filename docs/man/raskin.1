@@ -13,17 +13,20 @@ Emit the jdx/usage interface specification
 .SH COMMANDS
 .TP
 \fBcapture\fR
-Read explicit persisted user, host, system and container preferences plus native power profiles. Unsupported or unreadable sources are recorded. No settings are changed. With \-\-from, only the supplied offline tree is read; there is no live fallback.
+Read explicit persisted user, host, system and container preferences plus native power profiles. Unavailable settings are omitted from KDL; capture diagnostics go to stderr. No settings are changed. With \-\-from, only the supplied offline tree is read; there is no live fallback.
 .TP
 \fBgenerate\fR
 Validate saved KDL and emit native commands for a human to inspect and run. Generation never reads host settings or executes commands. Unsupported values fail before any output unless \-\-skip\-unsupported explicitly requests a partial script.
 .SH "RASKIN CAPTURE"
-Read explicit persisted user, host, system and container preferences plus native power profiles. Unsupported or unreadable sources are recorded. No settings are changed. With \-\-from, only the supplied offline tree is read; there is no live fallback.
+Read explicit persisted user, host, system and container preferences plus native power profiles. Unavailable settings are omitted from KDL; capture diagnostics go to stderr. No settings are changed. With \-\-from, only the supplied offline tree is read; there is no live fallback.
 .PP
 \fBUsage:\fR raskin capture [OPTIONS]
 .PP
 \fBOptions:\fR
 .PP
+.TP
+\fB\-v, \-\-verbose\fR
+Show per\-source capture diagnostics on stderr
 .TP
 \fB\-\-preset\fR \fI<PRESET>\fR
 Capture broad settings or a curated subset

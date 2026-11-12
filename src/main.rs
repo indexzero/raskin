@@ -1,7 +1,7 @@
 use clap::{CommandFactory, Parser, Subcommand, ValueHint};
 use raskin::{
-    Error, Result, artifact,
-    capture::{self, Preset},
+    Error, Reason, Result, artifact,
+    capture::{self, CaptureReport, Preset},
     codec,
     render::{self, GenerateOptions},
 };
@@ -30,10 +30,13 @@ struct Cli {
 enum Commands {
     #[command(
         about = "Read persisted preferences into KDL",
-        long_about = "Read explicit persisted user, host, system and container preferences plus native power profiles. Unsupported or unreadable sources are recorded. No settings are changed. With --from, only the supplied offline tree is read; there is no live fallback.",
+        long_about = "Read explicit persisted user, host, system and container preferences plus native power profiles. Unavailable settings are omitted from KDL; capture diagnostics go to stderr. No settings are changed. With --from, only the supplied offline tree is read; there is no live fallback.",
         after_help = "Examples:\n  raskin capture --preset input -o input.kdl\n  raskin capture --from ./saved-inputs -o saved.kdl"
     )]
     Capture {
+        /// Show per-source capture diagnostics on stderr.
+        #[arg(short, long)]
+        verbose: bool,
         /// Capture broad settings or a curated subset.
         #[arg(long, default_value="broad", value_parser=["broad","desktop","input","power"])]
         preset: String,
@@ -92,6 +95,7 @@ fn run() -> Result<()> {
     }
     match cli.command {
         Some(Commands::Capture {
+            verbose,
             preset,
             from,
             output,
@@ -108,10 +112,9 @@ fn run() -> Result<()> {
                 None => capture::capture_live(preset)?,
             };
             let text = codec::encode(&report.document)?;
-            for message in report.diagnostics {
-                eprintln!("{message}");
-            }
-            emit(output.as_deref(), text.as_bytes(), force, false)
+            emit(output.as_deref(), text.as_bytes(), force, false)?;
+            capture_summary(&report, output.as_deref(), preset, verbose);
+            Ok(())
         }
         Some(Commands::Generate {
             input,
@@ -161,5 +164,81 @@ fn emit(path: Option<&Path>, bytes: &[u8], force: bool, executable: bool) -> Res
             .lock()
             .write_all(bytes)
             .map_err(|e| Error::io("write stdout", "<stdout>", e)),
+    }
+}
+
+/// Summaries belong on stderr, and only after the artifact was written.
+fn capture_summary(report: &CaptureReport, output: Option<&Path>, preset: Preset, verbose: bool) {
+    let partial = if report.omissions.is_empty() {
+        ""
+    } else {
+        "partial "
+    };
+    match output {
+        Some(path) => eprintln!("Saved {partial}capture to {path:?}."),
+        None => eprintln!("Wrote {partial}capture to stdout."),
+    }
+    let keys: usize = report
+        .document
+        .domains
+        .values()
+        .chain(report.document.power.values())
+        .map(|values| values.len())
+        .sum();
+    let profiles = if report.document.power.is_empty() {
+        "none".to_owned()
+    } else {
+        report
+            .document
+            .power
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    eprintln!(
+        "Captured {keys} settings across {} preference domains; power profiles: {profiles}. Preset: {preset}.",
+        report.document.domains.len()
+    );
+    if !report.omissions.is_empty() {
+        let counts = [
+            (Reason::PermissionDenied, "permission denied"),
+            (Reason::Unsupported, "unsupported"),
+            (Reason::Missing, "missing"),
+            (Reason::ReadFailed, "read failures"),
+        ]
+        .into_iter()
+        .filter_map(|(reason, label)| {
+            let count = report
+                .omissions
+                .iter()
+                .filter(|entry| entry.reason == reason)
+                .count();
+            (count > 0).then(|| format!("{count} {label}"))
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+        eprintln!("Skipped sources/fields: {counts}.");
+    }
+    let failed_profiles = ["battery", "charger", "ups"]
+        .into_iter()
+        .filter(|profile| {
+            report.omissions.iter().any(|entry| {
+                entry.reason == Reason::ReadFailed && entry.source == format!("pmset:{profile}")
+            })
+        })
+        .collect::<Vec<_>>();
+    if !failed_profiles.is_empty() {
+        eprintln!(
+            "Power profiles not captured: {}.",
+            failed_profiles.join(", ")
+        );
+    }
+    if verbose {
+        for message in &report.diagnostics {
+            eprintln!("{message}");
+        }
+    } else if !report.omissions.is_empty() {
+        eprintln!("Use --verbose for per-source diagnostics.");
     }
 }

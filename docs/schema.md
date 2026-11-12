@@ -20,7 +20,6 @@ pmset {
     battery { displaysleep 5; }
     charger { displaysleep 30; }
 }
-unavailable "provider:systemsetup" reason="unsupported"
 ~~~
 
 ## Namespace and data boundaries
@@ -95,11 +94,13 @@ autohide #true inline="explanatory metadata"
 
 Metadata never becomes a preference or changes execution behavior. There is no mandatory vocabulary. The illustrative inline=meta in design examples is a placeholder, not capture data. Capture omits absent metadata. Generation does not modify its input.
 
-## Power and omissions
+## Power and capture diagnostics
 
 Power profiles are separate battery, charger, and ups groups. Unknown profiles or keys never become guessed commands or an all-profiles operation.
 
-An unavailable record has one source string and one reason: permission-denied, unsupported, missing, or read-failed. It is capture data and emits only an inert comment. Malformed native input uses read-failed with details on stderr. Preset filtering is intentional selection, reported separately from failures.
+Capture writes only settings it obtained. Unavailable values and capture bookkeeping are omitted from KDL. Diagnostics stay on stderr: a short summary by default, per-source detail with --verbose. Preset filtering remains intentional selection.
+
+For compatibility, earlier saved files may still contain unavailable nodes with one source string and a reason of permission-denied, unsupported, missing, or read-failed. The decoder accepts these records and generation treats them as inert comments. New captures never emit them.
 
 ## Validation and comparison
 

@@ -70,3 +70,7 @@ Command names, the detailed KDL schema, exact preset contents, and native comman
 ## Owner approval of the KDL schema
 
 The owner has opinions about the KDL schema and wants to review a concrete proposal first. Present the proposed structure, type representation, scope, and representative examples before implementation. Obtain the owner's explicit approval before schema-dependent work. Later changes to the approved syntax or meaning require renewed approval.
+
+## Capture output clarification: 2026-11-12
+
+The owner specified JSON-style omission: unavailable values are absent from saved KDL, as undefined object fields are absent from JSON output. Capture diagnostics belong on stderr. Normal output reports what was saved and summarizes skipped sources; detailed diagnostics are available explicitly. This supersedes the original proposal's inclusion of capture omission records in new capture documents.
