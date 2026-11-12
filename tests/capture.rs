@@ -888,10 +888,6 @@ fn native_power_labels_do_not_discard_battery_and_charger_settings() {
         Value::Integer(42)
     );
     assert_eq!(
-        report.document.power["battery"]["lowpowermode"].value,
-        Value::Integer(1)
-    );
-    assert_eq!(
         report.document.power["charger"]["tcpkeepalive"].value,
         Value::Integer(0)
     );
@@ -901,6 +897,8 @@ fn native_power_labels_do_not_discard_battery_and_charger_settings() {
         "pmset:charger/Future Read Only Label",
         "pmset:battery/hibernatefile",
         "pmset:battery/networkoversleep",
+        "pmset:battery/lowpowermode",
+        "pmset:charger/lowpowermode",
     ] {
         assert!(omitted(&report, source, Reason::Unsupported), "{source}");
     }
@@ -920,7 +918,6 @@ fn native_power_labels_do_not_discard_battery_and_charger_settings() {
         .script;
     assert!(script.contains("/usr/bin/pmset -b 'displaysleep' '7'"));
     assert!(script.contains("/usr/bin/pmset -c 'displaysleep' '42'"));
-    assert!(script.contains("/usr/bin/pmset -b 'lowpowermode' '1'"));
     assert!(script.contains("/usr/bin/pmset -c 'tcpkeepalive' '0'"));
     assert!(!script.contains("Sleep On Power Button"));
     // The script is text only. Never execute it.

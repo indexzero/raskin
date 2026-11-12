@@ -9,4 +9,4 @@
 
 - Keep unavailable capture data out of saved KDL; retain compatibility when reading earlier files.
 - Print concise capture results after a successful write; add --verbose for per-source details.
-- Preserve battery/charger settings beside native multiword display labels; support common low-power and TCP keepalive Boolean settings.
+- Preserve battery/charger settings beside native multiword display labels; support the TCP keepalive Boolean setting.

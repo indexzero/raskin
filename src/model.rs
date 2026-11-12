@@ -288,7 +288,6 @@ pub fn power_key_supported(profile: &str, key: &str) -> bool {
     }
     match key {
         "haltlevel" | "haltafter" | "haltremain" => profile == "ups",
-        "lowpowermode" => profile != "ups",
         "displaysleep"
         | "disksleep"
         | "sleep"
