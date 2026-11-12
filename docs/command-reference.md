@@ -38,9 +38,10 @@ Validate saved KDL and emit native commands for a human to inspect and run. Gene
 - **`<INPUT>`** — KDL input path, or - to read stdin
 
 ### Flags
+- **`-v --verbose`** — Show per-setting generation diagnostics on stderr
 - **`-o --output <FILE>`** — Write the script to this path; otherwise use stdout
 - **`--force`** — Atomically replace an existing output file
-- **`--skip-unsupported`** — Omit unsupported settings and name every omission in comments and diagnostics
+- **`--skip-unsupported`** — Omit unsupported settings, naming each in script comments; use --verbose for details on stderr
 
 Examples:
   raskin generate myprefs.kdl -o myprefs.macos

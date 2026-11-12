@@ -3,6 +3,10 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+mod report;
+pub use report::GenerationFailures;
+use report::Issue;
+
 use crate::model::power_key_supported;
 use crate::{Document, Domain, Error, Host, Result, Scope, Setting, Value};
 
@@ -16,23 +20,26 @@ pub struct GenerateOptions {
 pub struct Generated {
     pub script: String,
     pub diagnostics: Vec<String>,
+    pub unsupported: GenerationFailures,
+    pub settings: usize,
 }
 
 /// Validate and render saved data without consulting or changing any host.
 pub fn generate(document: &Document, options: GenerateOptions) -> Result<Generated> {
     document.validate()?;
     let mut body = String::new();
-    let mut skipped = Vec::new();
+    let mut skipped = GenerationFailures::default();
+    let mut settings = 0;
     let mut delimiter_number = 1;
     for (domain, properties) in &document.domains {
         let target = match defaults_target(domain) {
             Ok(target) => target,
             Err(reason) => {
                 if properties.is_empty() {
-                    skipped.push(format!("{}: {reason}", domain.identity()));
+                    skipped.reject(&domain.identity(), reason, false);
                 }
                 for key in properties.keys() {
-                    skipped.push(format!("{} key {key:?}: {reason}", domain.identity()));
+                    skipped.reject(&format!("{} key {key:?}", domain.identity()), reason, true);
                 }
                 continue;
             }
@@ -42,7 +49,10 @@ pub fn generate(document: &Document, options: GenerateOptions) -> Result<Generat
             let identity = format!("{} key {key:?}", domain.identity());
             let mut issues = Vec::new();
             if key.starts_with('-') {
-                issues.push("top-level key starts with an option marker".into());
+                issues.push(Issue::new(
+                    &identity,
+                    "top-level key starts with an option marker",
+                ));
             }
             check_text(key, &identity, false, &mut issues);
             check_value(&setting.value, &identity, &mut issues);
@@ -53,7 +63,7 @@ pub fn generate(document: &Document, options: GenerateOptions) -> Result<Generat
             if issues.is_empty() {
                 retained.insert(key.as_str(), setting);
             } else {
-                skipped.push(format!("{identity}: {}", issues.join("; ")));
+                skipped.push(issues, true);
             }
         }
         let xml = retained
@@ -68,7 +78,7 @@ pub fn generate(document: &Document, options: GenerateOptions) -> Result<Generat
                 if issues.is_empty() {
                     true
                 } else {
-                    skipped.push(format!("{identity}: {}", issues.join("; ")));
+                    skipped.push(issues, true);
                     false
                 }
             });
@@ -76,6 +86,7 @@ pub fn generate(document: &Document, options: GenerateOptions) -> Result<Generat
         if retained.is_empty() {
             continue;
         }
+        settings += retained.len();
         let _ = writeln!(body, "\n# {}", comment_text(&domain.identity()));
         if xml {
             let payload = xml_dictionary(&retained)?;
@@ -121,24 +132,30 @@ pub fn generate(document: &Document, options: GenerateOptions) -> Result<Generat
             _ => None,
         };
         if flag.is_none() && properties.is_empty() {
-            skipped.push(format!(
-                "pmset profile {profile:?}: unsupported power profile"
-            ));
+            skipped.reject(
+                &format!("pmset profile {profile:?}"),
+                "unsupported power profile",
+                false,
+            );
         }
         let mut commands = String::new();
         for (key, setting) in properties {
             let identity = format!("pmset profile {profile:?} key {key:?}");
             let reason = if flag.is_none() {
-                Some("unsupported power profile".into())
+                Some(Issue::new(&identity, "unsupported power profile"))
             } else if !power_key_supported(profile, key) {
-                Some("key has no documented writable pmset mapping for this profile".into())
+                Some(Issue::new(
+                    &identity,
+                    "key has no documented writable pmset mapping for this profile",
+                ))
             } else {
-                power_value_issue(key, &setting.value)
+                power_value_issue(key, &setting.value, &identity)
             };
             if let Some(reason) = reason {
-                skipped.push(format!("{identity}: {reason}"));
+                skipped.push(vec![reason], true);
                 continue;
             }
+            settings += 1;
             let Value::Integer(value) = setting.value else {
                 unreachable!("power value checked above")
             };
@@ -155,9 +172,9 @@ pub fn generate(document: &Document, options: GenerateOptions) -> Result<Generat
             body.push_str(&commands);
         }
     }
-    skipped.sort();
+    skipped.diagnostics.sort();
     if !skipped.is_empty() && !options.skip_unsupported {
-        return Err(Error::Unsupported(skipped.join("\n")));
+        return Err(Error::Unsupported(skipped));
     }
     let mut script = String::from(
         "#!/bin/sh\n# Generated by Raskin. Inspect before running on the destination Mac.\n# Native commands below define their own effects.\n",
@@ -178,9 +195,9 @@ pub fn generate(document: &Document, options: GenerateOptions) -> Result<Generat
         let _ = writeln!(
             script,
             "# Partial output: {} unsupported items skipped.",
-            skipped.len()
+            skipped.diagnostics.len()
         );
-        for diagnostic in skipped {
+        for diagnostic in &skipped.diagnostics {
             let diagnostic = format!("Skipped: {diagnostic}");
             let _ = writeln!(script, "# {}", comment_text(&diagnostic));
             diagnostics.push(diagnostic);
@@ -190,6 +207,8 @@ pub fn generate(document: &Document, options: GenerateOptions) -> Result<Generat
     Ok(Generated {
         script,
         diagnostics,
+        unsupported: skipped,
+        settings,
     })
 }
 
@@ -254,20 +273,23 @@ fn safe_identifier(value: &str) -> bool {
         })
 }
 
-fn check_value(value: &Value, path: &str, issues: &mut Vec<String>) {
+fn check_value(value: &Value, path: &str, issues: &mut Vec<Issue>) {
     match value {
         Value::String(text) => check_text(text, path, false, issues),
-        Value::Uid(_) => issues.push(format!(
-            "{path}: UID has no supported native representation"
+        Value::Uid(_) => issues.push(Issue::new(
+            path,
+            "UID has no supported native representation",
         )),
         Value::Integer(value) if *value > i64::MAX as i128 => {
-            issues.push(format!(
-                "{path}: integer exceeds signed 64-bit native range"
+            issues.push(Issue::new(
+                path,
+                "integer exceeds signed 64-bit native range",
             ));
         }
         Value::Real(value) if !value.is_finite() => {
-            issues.push(format!(
-                "{path}: nonfinite real has no supported native representation"
+            issues.push(Issue::new(
+                path,
+                "nonfinite real has no supported native representation",
             ));
         }
         Value::Date(date) => {
@@ -280,15 +302,17 @@ fn check_value(value: &Value, path: &str, issues: &mut Vec<String>) {
                 ),
             };
             if nanos != 0 {
-                issues.push(format!(
-                    "{path}: fractional-second date has no verified faithful native mapping"
+                issues.push(Issue::new(
+                    path,
+                    "fractional-second date has no verified faithful native mapping",
                 ));
             }
             // RFC 3339 formatting in plist is limited to four-digit nonnegative years.
             // Check SystemTime first: Date's public SystemTime constructor is unchecked.
             if !(-62_167_219_200..=253_402_300_799).contains(&seconds) {
-                issues.push(format!(
-                    "{path}: date is outside the supported four-digit year range"
+                issues.push(Issue::new(
+                    path,
+                    "date is outside the supported four-digit year range",
                 ));
             }
         }
@@ -308,9 +332,9 @@ fn check_value(value: &Value, path: &str, issues: &mut Vec<String>) {
     }
 }
 
-fn check_text(text: &str, path: &str, xml: bool, issues: &mut Vec<String>) {
+fn check_text(text: &str, path: &str, xml: bool, issues: &mut Vec<Issue>) {
     if text.contains('\0') {
-        issues.push(format!("{path}: embedded NUL is unsupported"));
+        issues.push(Issue::new(path, "embedded NUL is unsupported"));
     }
     if xml
         && text.chars().any(|ch| {
@@ -318,13 +342,14 @@ fn check_text(text: &str, path: &str, xml: bool, issues: &mut Vec<String>) {
                 || (ch >= ' ' && !matches!(ch, '\u{fffe}' | '\u{ffff}')))
         })
     {
-        issues.push(format!(
-            "{path}: text contains characters forbidden in the required XML plist"
+        issues.push(Issue::new(
+            path,
+            "text contains characters forbidden in the required XML plist",
         ));
     }
 }
 
-fn check_xml(value: &Value, path: &str, issues: &mut Vec<String>) {
+fn check_xml(value: &Value, path: &str, issues: &mut Vec<Issue>) {
     match value {
         Value::String(text) => check_text(text, path, true, issues),
         Value::Array(values) => {
@@ -477,9 +502,12 @@ fn comment_text(value: &str) -> String {
     output
 }
 
-fn power_value_issue(key: &str, value: &Value) -> Option<String> {
+fn power_value_issue(key: &str, value: &Value, path: &str) -> Option<Issue> {
     let Value::Integer(value) = value else {
-        return Some("pmset requires an integer; no type coercion is performed".into());
+        return Some(Issue::new(
+            path,
+            "pmset requires an integer; no type coercion is performed",
+        ));
     };
     let range = match key {
         "womp"
@@ -534,7 +562,10 @@ fn power_value_issue(key: &str, value: &Value) -> Option<String> {
             }
             "0 through 2147483647"
         }
-        _ => return Some("key has no verified value-range mapping".into()),
+        _ => return Some(Issue::new(path, "key has no verified value-range mapping")),
     };
-    Some(format!("unsupported pmset value {value}; expected {range}"))
+    Some(Issue::with_detail(
+        "unsupported pmset value",
+        format!("{path}: unsupported pmset value {value}; expected {range}"),
+    ))
 }

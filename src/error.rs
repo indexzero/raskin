@@ -19,8 +19,8 @@ pub enum Error {
         #[source]
         source: std::io::Error,
     },
-    #[error("unsupported generation:\n{0}")]
-    Unsupported(String),
+    #[error("unsupported generation: {0}")]
+    Unsupported(crate::render::GenerationFailures),
 }
 
 impl Error {

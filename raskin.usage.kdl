@@ -33,10 +33,11 @@ Examples:
   raskin generate - < myprefs.kdl
 """# {
     long_help "Validate saved KDL and emit native commands for a human to inspect and run. Generation never reads host settings or executes commands. Unsupported values fail before any output unless --skip-unsupported explicitly requests a partial script."
+    flag "-v --verbose" help="Show per-setting generation diagnostics on stderr"
     flag "-o --output" help="Write the script to this path; otherwise use stdout" {
         arg <FILE>
     }
     flag --force help="Atomically replace an existing output file"
-    flag --skip-unsupported help="Omit unsupported settings and name every omission in comments and diagnostics"
+    flag --skip-unsupported help="Omit unsupported settings, naming each in script comments; use --verbose for details on stderr"
     arg <INPUT> help="KDL input path, or - to read stdin"
 }

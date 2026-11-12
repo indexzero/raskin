@@ -349,8 +349,10 @@ fn unsupported_types_skip_whole_top_level_keys_and_account_for_each() {
         ("valid-typed", array([Value::Boolean(true)])),
     ]);
     let error = generate(&document, GenerateOptions::default()).unwrap_err();
-    assert!(matches!(error, Error::Unsupported(_)));
-    let error = error.to_string();
+    let Error::Unsupported(failures) = error else {
+        panic!("expected unsupported settings")
+    };
+    let error = failures.diagnostics.join("\n");
     assert!(error.contains("array-uid\"[1]"));
     assert!(error.contains("dict-nan\"[\"invalid\"]"));
     assert!(error.contains("signed 64-bit"));
@@ -897,11 +899,48 @@ fn tcp_keepalive_preserves_profiles_and_rejects_non_boolean_values() {
             .get_mut("battery")
             .unwrap()
             .insert("tcpkeepalive".into(), Value::Integer(value).into());
-        assert!(
-            generate(&invalid, Default::default())
-                .unwrap_err()
-                .to_string()
-                .contains("0 or 1")
-        );
+        let Error::Unsupported(failures) = generate(&invalid, Default::default()).unwrap_err()
+        else {
+            panic!("expected unsupported power value")
+        };
+        assert!(failures.diagnostics[0].contains("0 or 1"));
     }
+}
+
+#[test]
+fn generation_counts_top_level_settings_once_per_reason_and_distinguishes_empty_sources() {
+    let mut doc = document([
+        (
+            "mixed",
+            array([Value::Uid(1), Value::Uid(2), Value::Real(f64::NAN)]),
+        ),
+        ("valid", Value::Boolean(true)),
+    ]);
+    doc.power.insert("unknown".into(), Default::default());
+    let Error::Unsupported(failures) = generate(&doc, Default::default()).unwrap_err() else {
+        panic!("expected unsupported settings")
+    };
+    assert_eq!(failures.settings, 1);
+    assert_eq!(failures.empty_sources, 1);
+    assert_eq!(
+        failures.reasons["UID has no supported native representation"],
+        1
+    );
+    assert_eq!(
+        failures.reasons["nonfinite real has no supported native representation"],
+        1
+    );
+    let summary = failures.to_string();
+    assert!(summary.starts_with("1 unsupported settings; 1 unsupported empty sources."));
+    assert!(summary.contains("more than one reason"));
+    assert!(!summary.contains("mixed"));
+    let generated = partial(&doc);
+    assert_eq!(generated.unsupported, failures);
+    assert_eq!(generated.settings, 1);
+    assert!(generated.script.contains("'valid' -bool 'TRUE'"));
+    assert!(
+        !generated
+            .script
+            .contains(" write 'com.example.render' 'mixed'")
+    );
 }

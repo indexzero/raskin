@@ -331,3 +331,197 @@ fn failed_power_profile_remains_visible_in_the_short_capture_summary() {
     assert_eq!(doc.power.len(), 1);
     assert!(doc.unavailable.is_empty());
 }
+
+/// Many nested failures in one key must not inflate its count or flood normal stderr.
+fn unsupported_generation_input(dir: &Path) -> String {
+    use raskin::{Document, Domain, Value};
+    let date = Value::Date(plist::Date::from_xml_format("2026-01-01T00:00:00.125Z").unwrap());
+    let doc = Document {
+        domains: [
+            (
+                Domain::user("Example Cache"),
+                (0..256)
+                    .map(|n| (format!("repeated-{n:03}"), Value::Boolean(true).into()))
+                    .collect(),
+            ),
+            (
+                Domain::user("com.example.fixture"),
+                [
+                    ("keep".into(), Value::String("retained".into()).into()),
+                    ("dates".into(), Value::Array(vec![date.into(); 512]).into()),
+                    ("unsigned".into(), Value::Integer(u64::MAX as i128).into()),
+                    ("uid".into(), Value::Uid(7).into()),
+                ]
+                .into(),
+            ),
+        ]
+        .into(),
+        ..Default::default()
+    };
+    let input = codec::encode(&doc).unwrap();
+    fs::write(dir.join("unsupported.kdl"), &input).unwrap();
+    input
+}
+
+#[test]
+fn generation_failure_summarizes_every_reason_and_expands_only_with_verbose() {
+    let tmp = temp();
+    let dir = tmp.path();
+    let saved = unsupported_generation_input(dir);
+    fs::write(dir.join("keep.macos"), "existing output").unwrap();
+    for output in ["failed.macos", "keep.macos"] {
+        let result = cli(
+            &["generate", "unsupported.kdl", "-o", output, "--force"],
+            dir,
+        );
+        assert!(!result.status.success());
+        assert!(result.stdout.is_empty());
+        let message = String::from_utf8(result.stderr).unwrap();
+        assert!(message.starts_with("error: generation stopped; no output was written."));
+        assert!(message.contains("259 unsupported settings"));
+        assert!(message.contains("256: unsafe domain identity"));
+        assert!(message.contains("1: fractional-second date"));
+        assert!(message.contains("1: integer exceeds signed 64-bit"));
+        assert!(message.contains("1: UID"));
+        assert!(message.contains("--verbose") && message.contains("--skip-unsupported"));
+        assert!(!message.contains("repeated-") && !message.contains("dates\"[511]"));
+        assert!(
+            message.lines().count() <= 10 && message.len() < 1200,
+            "{message}"
+        );
+    }
+    assert!(!dir.join("failed.macos").exists());
+    assert_eq!(
+        fs::read_to_string(dir.join("keep.macos")).unwrap(),
+        "existing output"
+    );
+    let verbose = cli(
+        &[
+            "generate",
+            "unsupported.kdl",
+            "--verbose",
+            "-o",
+            "verbose.macos",
+        ],
+        dir,
+    );
+    assert!(!verbose.status.success());
+    assert!(verbose.stdout.is_empty());
+    assert!(!dir.join("verbose.macos").exists());
+    let details = String::from_utf8(verbose.stderr).unwrap();
+    assert!(details.starts_with("error: generation stopped; no output was written."));
+    assert!(details.contains("repeated-255") && details.contains("dates\"[511]"));
+    let stdout = cli(&["generate", "unsupported.kdl"], dir);
+    assert!(!stdout.status.success() && stdout.stdout.is_empty());
+    assert_eq!(
+        saved,
+        fs::read_to_string(dir.join("unsupported.kdl")).unwrap()
+    );
+}
+
+#[test]
+fn partial_generation_reports_saved_settings_concisely_and_keeps_stdout_clean() {
+    let tmp = temp();
+    let dir = tmp.path();
+    unsupported_generation_input(dir);
+    let result = cli(
+        &[
+            "generate",
+            "unsupported.kdl",
+            "--skip-unsupported",
+            "-o",
+            "partial.macos",
+        ],
+        dir,
+    );
+    assert!(result.status.success() && result.stdout.is_empty());
+    let message = String::from_utf8(result.stderr).unwrap();
+    assert!(message.starts_with("Saved partial script to \"partial.macos\"."));
+    assert!(message.contains("Generated 1 settings."));
+    assert!(message.contains("Skipped 259 unsupported settings"));
+    assert!(
+        message.lines().count() <= 10 && message.len() < 1200,
+        "{message}"
+    );
+    assert!(!message.contains("repeated-255"));
+    let script = fs::read(dir.join("partial.macos")).unwrap();
+    let text = String::from_utf8(script.clone()).unwrap();
+    assert!(text.contains("# Partial output: 259 unsupported items skipped."));
+    assert!(text.contains("'keep' -string 'retained'"));
+    assert!(text.contains("repeated-255") && text.contains("dates\"[511]"));
+    let stdout = cli(&["generate", "unsupported.kdl", "--skip-unsupported"], dir);
+    assert!(stdout.status.success());
+    assert_eq!(stdout.stdout, script);
+    assert!(
+        String::from_utf8(stdout.stderr)
+            .unwrap()
+            .starts_with("Wrote partial script to stdout.")
+    );
+    let verbose = cli(
+        &["generate", "unsupported.kdl", "--skip-unsupported", "-v"],
+        dir,
+    );
+    assert!(verbose.status.success());
+    assert_eq!(verbose.stdout, script);
+    let details = String::from_utf8(verbose.stderr).unwrap();
+    assert!(details.contains("repeated-255") && details.contains("dates\"[511]"));
+}
+
+#[test]
+fn generation_write_failure_does_not_claim_success_or_dump_skip_details() {
+    let tmp = temp();
+    let dir = tmp.path();
+    unsupported_generation_input(dir);
+    fs::write(dir.join("exists.macos"), "keep me").unwrap();
+    for output in ["exists.macos", "missing/output.macos"] {
+        let result = cli(
+            &[
+                "generate",
+                "unsupported.kdl",
+                "--skip-unsupported",
+                "--verbose",
+                "-o",
+                output,
+            ],
+            dir,
+        );
+        assert!(!result.status.success() && result.stdout.is_empty());
+        let message = String::from_utf8(result.stderr).unwrap();
+        assert!(message.starts_with("error:"), "{message}");
+        assert!(
+            !message.contains("Saved")
+                && !message.contains("Generated")
+                && !message.contains("repeated-255")
+        );
+    }
+    assert_eq!(
+        fs::read_to_string(dir.join("exists.macos")).unwrap(),
+        "keep me"
+    );
+}
+
+#[test]
+fn legacy_capture_records_are_summarized_during_generation() {
+    let tmp = temp();
+    let dir = tmp.path();
+    fs::write(
+        dir.join("legacy.kdl"),
+        "raskin 1\nunavailable \"fixture:missing\" reason=\"missing\"\n",
+    )
+    .unwrap();
+    let result = cli(&["generate", "legacy.kdl"], dir);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let summary = String::from_utf8(result.stderr).unwrap();
+    assert!(summary.starts_with("Wrote partial script to stdout."));
+    assert!(summary.contains("Input records 1 unavailable capture sources."));
+    assert!(!summary.contains("fixture:missing"));
+    assert!(
+        String::from_utf8(result.stdout)
+            .unwrap()
+            .contains("fixture:missing")
+    );
+}

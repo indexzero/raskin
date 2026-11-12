@@ -50,6 +50,9 @@ Validate saved KDL and emit native commands for a human to inspect and run. Gene
 \fBOptions:\fR
 .PP
 .TP
+\fB\-v, \-\-verbose\fR
+Show per\-setting generation diagnostics on stderr
+.TP
 \fB\-o, \-\-output\fR \fI<FILE>\fR
 Write the script to this path; otherwise use stdout
 .TP
@@ -57,7 +60,7 @@ Write the script to this path; otherwise use stdout
 Atomically replace an existing output file
 .TP
 \fB\-\-skip\-unsupported\fR
-Omit unsupported settings and name every omission in comments and diagnostics
+Omit unsupported settings, naming each in script comments; use \-\-verbose for details on stderr
 \fBArguments:\fR
 .PP
 .TP

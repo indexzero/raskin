@@ -56,6 +56,9 @@ enum Commands {
         after_help = "Examples:\n  raskin generate myprefs.kdl -o myprefs.macos\n  raskin generate myprefs.kdl --skip-unsupported -o partial.macos\n  raskin generate - < myprefs.kdl"
     )]
     Generate {
+        /// Show per-setting generation diagnostics on stderr.
+        #[arg(short, long)]
+        verbose: bool,
         /// KDL input path, or - to read stdin.
         #[arg(value_hint=ValueHint::FilePath)]
         input: PathBuf,
@@ -65,16 +68,30 @@ enum Commands {
         /// Atomically replace an existing output file.
         #[arg(long, requires = "output")]
         force: bool,
-        /// Omit unsupported settings and name every omission in comments and diagnostics.
+        /// Omit unsupported settings, naming each in script comments; use --verbose for details on stderr.
         #[arg(long)]
         skip_unsupported: bool,
     },
 }
 fn main() -> ExitCode {
-    match run() {
+    let cli = Cli::parse();
+    let verbose = matches!(&cli.command, Some(Commands::Generate { verbose: true, .. }));
+    match run(cli) {
         Ok(()) => ExitCode::SUCCESS,
         Err(Error::Io { source, .. }) if source.kind() == std::io::ErrorKind::BrokenPipe => {
             ExitCode::SUCCESS
+        }
+        Err(Error::Unsupported(failures)) => {
+            eprintln!("error: generation stopped; no output was written.\n{failures}");
+            if verbose {
+                for diagnostic in &failures.diagnostics {
+                    eprintln!("{diagnostic}");
+                }
+            } else {
+                eprintln!("Use --verbose for per-setting details.");
+            }
+            eprintln!("Use --skip-unsupported to generate a partial script.");
+            ExitCode::FAILURE
         }
         Err(error) => {
             eprintln!("error: {error}");
@@ -82,8 +99,7 @@ fn main() -> ExitCode {
         }
     }
 }
-fn run() -> Result<()> {
-    let cli = Cli::parse();
+fn run(cli: Cli) -> Result<()> {
     if cli.usage_spec {
         let mut spec = Vec::new();
         clap_usage::generate(&mut Cli::command(), "raskin", &mut spec);
@@ -117,6 +133,7 @@ fn run() -> Result<()> {
             Ok(())
         }
         Some(Commands::Generate {
+            verbose,
             input,
             output,
             force,
@@ -147,10 +164,14 @@ fn run() -> Result<()> {
             })?;
             let document = codec::decode(&text, &input.to_string_lossy())?;
             let generated = render::generate(&document, GenerateOptions { skip_unsupported })?;
-            for message in generated.diagnostics {
-                eprintln!("{message}");
-            }
-            emit(output.as_deref(), generated.script.as_bytes(), force, true)
+            emit(output.as_deref(), generated.script.as_bytes(), force, true)?;
+            generation_summary(
+                &generated,
+                output.as_deref(),
+                document.unavailable.len(),
+                verbose,
+            );
+            Ok(())
         }
         None => Err(Error::Invalid(
             "choose capture or generate; see --help".into(),
@@ -240,5 +261,39 @@ fn capture_summary(report: &CaptureReport, output: Option<&Path>, preset: Preset
         }
     } else if !report.omissions.is_empty() {
         eprintln!("Use --verbose for per-source diagnostics.");
+    }
+}
+
+/// Keep ordinary diagnostics bounded even for broad captures with many unsupported values.
+fn generation_summary(
+    generated: &render::Generated,
+    output: Option<&Path>,
+    capture_unavailable: usize,
+    verbose: bool,
+) {
+    let partial = if generated.unsupported.is_empty() && capture_unavailable == 0 {
+        ""
+    } else {
+        "partial "
+    };
+    match output {
+        Some(path) => eprintln!("Saved {partial}script to {path:?}."),
+        None => eprintln!("Wrote {partial}script to stdout."),
+    }
+    eprintln!("Generated {} settings.", generated.settings);
+    if !generated.unsupported.is_empty() {
+        eprintln!("Skipped {}", generated.unsupported);
+    }
+    if capture_unavailable > 0 {
+        eprintln!("Input records {capture_unavailable} unavailable capture sources.");
+    }
+    if verbose {
+        for message in &generated.diagnostics {
+            eprintln!("{message}");
+        }
+    } else if !generated.diagnostics.is_empty() {
+        eprintln!(
+            "Use --verbose for per-setting details; omissions are also listed in script comments."
+        );
     }
 }
