@@ -1209,3 +1209,58 @@ fn curated_capture_checks_only_selected_keys_for_generation_support() {
         assert_capture_generates(&report);
     }
 }
+
+#[test]
+fn capture_omits_empty_collections_whose_child_block_exceeds_the_depth_limit() {
+    // Debug KDL parsing at the supported depth boundary needs more stack
+    // than the test harness's default worker thread.
+    std::thread::Builder::new()
+        .stack_size(8 * 1024 * 1024)
+        .spawn(|| {
+            use plist::Value as P;
+            for dictionary_leaf in [false, true] {
+                for dictionary_wrappers in [false, true] {
+                    let nested = |count| {
+                        let mut value = if dictionary_leaf {
+                            P::Dictionary(Default::default())
+                        } else {
+                            P::Array(Vec::new())
+                        };
+                        for _ in 0..count {
+                            value = if dictionary_wrappers {
+                                P::Dictionary([("child".to_owned(), value)].into_iter().collect())
+                            } else {
+                                P::Array(vec![value])
+                            };
+                        }
+                        value
+                    };
+                    let fits = nested(123);
+                    let mut reader = MockReader::default();
+                    reader.file(
+                        "user/com.example.boundary.plist",
+                        Ok(binary_bytes(&[
+                            ("keep", P::Boolean(true)),
+                            ("fits", fits.clone()),
+                            ("exceeds", nested(124)),
+                        ])),
+                    );
+                    let report = capture_with_reader(&reader, Preset::Broad).unwrap();
+                    let properties =
+                        &report.document.domains[&Domain::user("com.example.boundary")];
+                    assert_eq!(properties.len(), 2);
+                    assert_eq!(properties["fits"].value, Value::from_plist(fits).unwrap());
+                    assert_eq!(properties["keep"].value, Value::Boolean(true));
+                    assert!(diagnostic(&report, "nesting limit"));
+                    assert!(report.omissions.iter().any(|omission| {
+                        omission.source.ends_with("key \"exceeds\"")
+                            && omission.reason == Reason::Unsupported
+                    }));
+                    assert_capture_generates(&report);
+                }
+            }
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}

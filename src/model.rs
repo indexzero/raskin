@@ -159,7 +159,9 @@ impl Value {
         !matches!(self, Self::Array(_) | Self::Dict(_))
     }
     pub fn validate(&self, depth: usize) -> Result<()> {
-        if depth > MAX_DEPTH {
+        // Empty collections still need a child block, which also counts
+        // toward the decoder's limit on nested KDL braces.
+        if depth > MAX_DEPTH || (depth == MAX_DEPTH && !self.is_scalar()) {
             return Err(Error::Invalid("value exceeds nesting limit of 128".into()));
         }
         match self {

@@ -222,3 +222,47 @@ fn every_kdl_line_ending_terminates_comments_before_nesting_checks() {
         );
     }
 }
+
+#[test]
+fn empty_collections_count_their_required_child_block_toward_the_nesting_limit() {
+    // Debug KDL parsing at the supported depth boundary needs more stack
+    // than the test harness's default worker thread.
+    std::thread::Builder::new()
+        .stack_size(8 * 1024 * 1024)
+        .spawn(|| {
+            use raskin::{Document, Setting};
+            for leaf in [Value::Array(Vec::new()), Value::Dict(Default::default())] {
+                for count in [123, 124] {
+                    let mut value = leaf.clone();
+                    for _ in 0..count {
+                        value = Value::Array(vec![Setting::new(value)]);
+                    }
+                    let document = Document {
+                        domains: [(
+                            Domain::user("com.example.boundary"),
+                            [("nested".to_owned(), Setting::new(value))]
+                                .into_iter()
+                                .collect(),
+                        )]
+                        .into_iter()
+                        .collect(),
+                        ..Document::default()
+                    };
+                    if count == 123 {
+                        let text = encode(&document).unwrap();
+                        assert_eq!(decode(&text, "boundary.kdl").unwrap(), document);
+                    } else {
+                        assert!(
+                            encode(&document)
+                                .unwrap_err()
+                                .to_string()
+                                .contains("nesting limit")
+                        );
+                    }
+                }
+            }
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
