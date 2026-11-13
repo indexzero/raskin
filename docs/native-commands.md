@@ -21,7 +21,7 @@ When XML is required, a quoted here-document passes the emitted domain dictionar
 
 Source UUIDs do not become target identities, but absolute paths or identifiers inside values stay literal. System writes use explicit paths; running a plain domain command through sudo is not treated as system scope.
 
-Generation rejects UIDs, nonfinite reals, integers above signed 64-bit range, fractional dates, unrepresentable text, unsafe identities, and unsupported scopes. These can remain faithfully stored in KDL. Explicit partial generation names skipped top-level settings. It never silently drops nested members.
+Capture and generation share checks for UIDs, nonfinite reals, integers above signed 64-bit range, fractional dates, unrepresentable text, unsafe identities, unsupported scopes, and power ranges. New capture output omits settings that fail those checks. Existing or edited KDL may still contain them; generation skips them by default or fails with --strict. A nested failure omits the whole top-level setting, preserving the meaning of every retained collection.
 
 Tests inspect shell text and parse native data. They never execute commands. Rust plist 1.10.3's ASCII parser does not recognize native data tokens. OpenStep bytes therefore have exact text fixtures and primary-source evidence, not a claimed parser round trip. XML data and string-only OpenStep structures have parser round trips.
 

@@ -1,6 +1,6 @@
 # Contributing
 
-The library owns the typed model, KDL codec, capture readers, native renderer, and atomic artifacts. The binary routes arguments and output.
+The library owns the typed model, KDL codec, capture readers, shared support analysis, native renderer, and atomic artifacts. The binary routes arguments and output.
 
 Read [AGENTS.md](AGENTS.md) and [INTENT.md](INTENT.md). The owner-approved schema is in [docs/schema.md](docs/schema.md). Changes to syntax or meaning need owner approval.
 
@@ -38,7 +38,7 @@ This generates the usage specification, Markdown reference, manpage, and bash/zs
 
 ## Mapping and dependency changes
 
-Add primary command/API evidence and synthetic fixtures. Retain types and scope. Never use a settings mutation as verification. Unsupported mappings need explicit diagnostics.
+Add primary command/API evidence and synthetic fixtures. Retain types and scope. Never use a settings mutation as verification. Support checks belong in the shared analysis used by capture and generation. Unsupported mappings need explicit diagnostics. Test new captures through KDL round trips and strict generation; never duplicate generator support rules in capture.
 
 plist is exactly pinned because capture uses its streaming API to reject duplicate keys before materialization. Retain those tests when updating it.
 

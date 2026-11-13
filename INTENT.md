@@ -78,3 +78,7 @@ The owner specified JSON-style omission: unavailable values are absent from save
 ## Generation default clarification: 2026-11-12
 
 Generate supported settings by default, omitting complete unsupported top-level settings with a brief summary. The ordinary command must produce the useful artifact without requiring --skip-unsupported. Detailed diagnostics remain opt-in. --strict explicitly requests failure before output when unsupported settings exist. Invalid KDL and output errors still fail.
+
+## Capture support clarification: 2026-11-12
+
+If generation cannot support a setting, capture must omit it. Capture and generation use the same support checks, including domain-wide encoding constraints. Unsupported nested data excludes its whole top-level setting; retained values are never altered to fit. This applies to every preset. New KDL contains supported settings only, and omissions remain capture diagnostics. Existing or edited KDL remains readable.

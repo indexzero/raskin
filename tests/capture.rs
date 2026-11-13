@@ -190,7 +190,7 @@ fn presets_have_exact_stable_names() {
 }
 
 #[test]
-fn broad_preserves_xml_binary_types_and_scoped_identities() {
+fn broad_preserves_supported_xml_binary_types_and_scoped_identities() {
     let report = capture_offline(&fixture_root(), Preset::Broad).unwrap();
     let xml = &report.document.domains[&Domain::user("com.example.types")];
     let binary = &report.document.domains[&Domain::user("com.example.binary")];
@@ -215,20 +215,21 @@ fn broad_preserves_xml_binary_types_and_scoped_identities() {
             Value::String("same".into()).into()
         ])
     );
-    assert_eq!(
-        xml["MaximumUnsigned"].value,
-        Value::Integer(u64::MAX.into())
-    );
+    assert!(!xml.contains_key("MaximumUnsigned"));
+    assert!(!binary.contains_key("MaximumUnsigned"));
     assert_eq!(xml["MinimumSigned"].value, Value::Integer(i64::MIN.into()));
     assert_eq!(
         xml["Date"].value,
         Value::Date(plist::Date::from_xml_format("2026-10-30T19:24:05Z").unwrap())
     );
-    assert_eq!(
-        binary["Date"].value,
-        Value::Date(plist::Date::from_xml_format("2026-10-30T19:24:05.125Z").unwrap())
-    );
-    assert_eq!(binary["Uid"].value, Value::Uid(42));
+    assert!(!binary.contains_key("Date"));
+    assert!(!binary.contains_key("Uid"));
+    assert!(diagnostic(&report, "fractional-second date"));
+    assert!(diagnostic(
+        &report,
+        "UID has no supported native representation"
+    ));
+    assert!(diagnostic(&report, "integer exceeds signed 64-bit"));
     for key in xml.keys().filter(|key| key.as_str() != "Date") {
         assert_eq!(xml[key], binary[key], "type mismatch for {key}");
     }
@@ -246,17 +247,10 @@ fn broad_preserves_xml_binary_types_and_scoped_identities() {
     for identity in [
         domain("com.apple.dock", Scope::User, Host::Current, None),
         domain("com.example.system", Scope::System, Host::Any, None),
-        domain("com.example.system", Scope::System, Host::Current, None),
         domain(
             "com.example.preferences",
             Scope::User,
             Host::Any,
-            Some("com.example.sandbox"),
-        ),
-        domain(
-            "com.example.preferences",
-            Scope::User,
-            Host::Current,
             Some("com.example.sandbox"),
         ),
     ] {
@@ -264,6 +258,18 @@ fn broad_preserves_xml_binary_types_and_scoped_identities() {
             report.document.domains.contains_key(&identity),
             "missing {identity:?}"
         );
+    }
+    for unsupported in [
+        domain("com.example.system", Scope::System, Host::Current, None),
+        domain(
+            "com.example.preferences",
+            Scope::User,
+            Host::Current,
+            Some("com.example.sandbox"),
+        ),
+    ] {
+        assert!(!report.document.domains.contains_key(&unsupported));
+        assert!(diagnostic(&report, &unsupported.identity()));
     }
     assert_eq!(
         report.document.power["battery"]["displaysleep"].value,
@@ -935,4 +941,271 @@ fn duplicate_native_display_labels_still_reject_ambiguous_profiles() {
     );
     assert!(omitted(&report, "pmset:battery", Reason::ReadFailed));
     assert!(diagnostic(&report, "duplicate power key"));
+}
+
+fn binary_bytes(dictionary: &[(&str, plist::Value)]) -> Vec<u8> {
+    let value = plist::Value::Dictionary(
+        dictionary
+            .iter()
+            .map(|(key, value)| (key.to_string(), value.clone()))
+            .collect(),
+    );
+    let mut bytes = Vec::new();
+    value.to_writer_binary(&mut bytes).unwrap();
+    bytes
+}
+
+fn assert_capture_generates(report: &CaptureReport) {
+    let text = raskin::codec::encode(&report.document).unwrap();
+    let saved = raskin::codec::decode(&text, "captured.kdl").unwrap();
+    assert_eq!(saved, report.document);
+    assert!(saved.unavailable.is_empty());
+    let generated = raskin::render::generate(
+        &saved,
+        raskin::render::GenerateOptions {
+            skip_unsupported: false,
+        },
+    )
+    .unwrap();
+    assert!(generated.unsupported.is_empty());
+    assert!(generated.diagnostics.is_empty());
+    assert_eq!(
+        generated.settings,
+        saved
+            .domains
+            .values()
+            .chain(saved.power.values())
+            .map(BTreeMap::len)
+            .sum::<usize>()
+    );
+}
+
+#[test]
+fn every_capture_preset_roundtrips_into_strict_generation() {
+    for preset in [Preset::Broad, Preset::Desktop, Preset::Input, Preset::Power] {
+        assert_capture_generates(&capture_offline(&fixture_root(), preset).unwrap());
+    }
+}
+
+#[test]
+fn capture_omits_unsupported_values_names_and_whole_collections() {
+    use plist::Value as P;
+    let mut reader = MockReader::default();
+    let mut too_deep = P::String("exceeds the KDL depth once the domain is included".into());
+    for _ in 0..125 {
+        too_deep = P::Array(vec![too_deep]);
+    }
+    let bad = [
+        ("uid", P::Uid(plist::Uid::new(42))),
+        (
+            "fraction",
+            P::Date(plist::Date::from_xml_format("2026-01-01T12:00:00.125Z").unwrap()),
+        ),
+        ("overflow", P::Integer(u64::MAX.into())),
+        ("nan", P::Real(f64::NAN)),
+        ("infinity", P::Real(f64::INFINITY)),
+        ("negative-infinity", P::Real(f64::NEG_INFINITY)),
+        ("nul", P::String("before\0after".into())),
+        ("-option", P::Boolean(true)),
+        (
+            "bad-array",
+            P::Array(vec![
+                P::String("omit the complete value".into()),
+                P::Uid(plist::Uid::new(1)),
+            ]),
+        ),
+        (
+            "bad-dict",
+            P::Dictionary(
+                [
+                    ("safe".to_owned(), P::Boolean(true)),
+                    ("unsafe".to_owned(), P::Uid(plist::Uid::new(2))),
+                ]
+                .into_iter()
+                .collect(),
+            ),
+        ),
+        ("too-deep", too_deep),
+    ];
+    let mut fields = bad.to_vec();
+    fields.push(("keep", P::Boolean(true)));
+    fields.push((
+        "nested-keep",
+        P::Array(vec![P::Boolean(false), P::Integer(1.into())]),
+    ));
+    reader.file("user/com.example.filter.plist", Ok(binary_bytes(&fields)));
+    reader.file("user/Avatar Cache Index.plist", Ok(simple()));
+    reader.file(
+        "user/com.example.emptied.plist",
+        Ok(binary_bytes(&[("uid", P::Uid(plist::Uid::new(3)))])),
+    );
+    let report = capture_with_reader(&reader, Preset::Broad).unwrap();
+    let identity = Domain::user("com.example.filter");
+    let kept = report.document.domains.get(&identity).unwrap_or_else(|| {
+        panic!(
+            "missing retained domain: {:?}",
+            report
+                .diagnostics
+                .iter()
+                .filter(|message| message.contains("com.example.filter"))
+                .collect::<Vec<_>>()
+        )
+    });
+    assert_eq!(
+        kept.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["keep", "nested-keep"]
+    );
+    for (key, _) in bad {
+        assert!(
+            omitted(
+                &report,
+                &format!("{} key {key:?}", identity.identity()),
+                Reason::Unsupported
+            ),
+            "{key}"
+        );
+    }
+    assert!(
+        !report
+            .document
+            .domains
+            .contains_key(&Domain::user("Avatar Cache Index"))
+    );
+    assert!(
+        !report
+            .document
+            .domains
+            .contains_key(&Domain::user("com.example.emptied"))
+    );
+    assert!(diagnostic(&report, "unsafe domain identity"));
+    assert_capture_generates(&report);
+}
+
+#[test]
+fn capture_checks_xml_siblings_after_removing_unsupported_settings() {
+    use plist::Value as P;
+    let mut reader = MockReader::default();
+    let control = P::String("before\u{1b}after".into());
+    reader.file(
+        "user/com.example.requiresxml.plist",
+        Ok(binary_bytes(&[
+            ("control", control.clone()),
+            ("typed", P::Array(vec![P::Boolean(true)])),
+            ("key\u{1b}", P::Boolean(true)),
+        ])),
+    );
+    reader.file(
+        "user/com.example.scalar.plist",
+        Ok(binary_bytes(&[
+            ("control", control.clone()),
+            (
+                "bad-compound",
+                P::Array(vec![P::Boolean(true), control.clone()]),
+            ),
+        ])),
+    );
+    reader.file(
+        "user/com.example.openstep.plist",
+        Ok(binary_bytes(&[(
+            "control",
+            P::Array(vec![control.clone()]),
+        )])),
+    );
+    let report = capture_with_reader(&reader, Preset::Broad).unwrap();
+    let xml = &report.document.domains[&Domain::user("com.example.requiresxml")];
+    assert_eq!(
+        xml.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["typed"]
+    );
+    let scalar = &report.document.domains[&Domain::user("com.example.scalar")];
+    assert_eq!(
+        scalar.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["control"]
+    );
+    assert_eq!(
+        scalar["control"].value,
+        Value::String("before\u{1b}after".into())
+    );
+    assert!(report.document.domains[&Domain::user("com.example.openstep")].contains_key("control"));
+    assert_capture_generates(&report);
+}
+
+#[test]
+fn capture_omits_power_values_outside_native_ranges_and_empty_profiles() {
+    let report = MockReader::power_report(
+        "Battery Power:\n sleep 10\n displaysleep -1\n womp 2\n tcpkeepalive 2\n hibernatemode 5\n highstandbythreshold 101\n standbydelayhigh 2147483648\nAC Power:\n displaysleep 42\nUPS Power:\n haltlevel 101\n",
+    );
+    assert_eq!(
+        report.document.power["battery"]
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        ["sleep"]
+    );
+    assert_eq!(
+        report.document.power["charger"]["displaysleep"].value,
+        Value::Integer(42)
+    );
+    assert!(!report.document.power.contains_key("ups"));
+    assert_eq!(report.omissions.len(), 7);
+    for key in [
+        "displaysleep",
+        "womp",
+        "tcpkeepalive",
+        "hibernatemode",
+        "highstandbythreshold",
+        "standbydelayhigh",
+    ] {
+        assert!(omitted(
+            &report,
+            &format!("pmset:battery/{key}"),
+            Reason::Unsupported
+        ));
+    }
+    assert!(omitted(&report, "pmset:ups/haltlevel", Reason::Unsupported));
+    assert_capture_generates(&report);
+}
+
+#[test]
+fn curated_capture_checks_only_selected_keys_for_generation_support() {
+    use plist::Value as P;
+    let mut reader = MockReader::default();
+    reader.file(
+        "user/com.apple.dock.plist",
+        Ok(binary_bytes(&[
+            ("autohide", P::Boolean(true)),
+            ("tilesize", P::Uid(plist::Uid::new(1))),
+            ("cache", P::Uid(plist::Uid::new(2))),
+        ])),
+    );
+    reader.file(
+        "user/.GlobalPreferences.plist",
+        Ok(binary_bytes(&[
+            ("InitialKeyRepeat", P::Integer(23.into())),
+            ("KeyRepeat", P::Uid(plist::Uid::new(1))),
+            ("cache", P::Uid(plist::Uid::new(2))),
+        ])),
+    );
+    for (preset, domain, keep, omit) in [
+        (Preset::Desktop, "com.apple.dock", "autohide", "tilesize"),
+        (
+            Preset::Input,
+            "NSGlobalDomain",
+            "InitialKeyRepeat",
+            "KeyRepeat",
+        ),
+    ] {
+        let report = capture_with_reader(&reader, preset).unwrap();
+        assert_eq!(
+            report.document.domains[&Domain::user(domain)]
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            [keep]
+        );
+        assert_eq!(report.omissions.len(), 1);
+        assert!(report.omissions[0].source.contains(omit));
+        assert!(!report.omissions[0].source.contains("cache"));
+        assert_capture_generates(&report);
+    }
 }

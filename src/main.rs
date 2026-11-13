@@ -30,7 +30,7 @@ struct Cli {
 enum Commands {
     #[command(
         about = "Read persisted preferences into KDL",
-        long_about = "Read explicit persisted user, host, system and container preferences plus native power profiles. Unavailable settings are omitted from KDL; capture diagnostics go to stderr. No settings are changed. With --from, only the supplied offline tree is read; there is no live fallback.",
+        long_about = "Read explicit persisted user, host, system and container preferences plus native power profiles. Only settings supported by generation enter KDL; unavailable or unsupported settings are omitted and summarized on stderr. No settings are changed. With --from, only the supplied offline tree is read; there is no live fallback.",
         after_help = "Examples:\n  raskin capture --preset input -o input.kdl\n  raskin capture --from ./saved-inputs -o saved.kdl"
     )]
     Capture {

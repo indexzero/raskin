@@ -2,7 +2,7 @@
 
 Broad is the default and has no curated preference-key filter. It reads supported stores and reports unsupported or unreadable sources on stderr.
 
-The three curated presets preserve captured values. They do not substitute recommended values. Desktop and input include matching user/any-host and user/current-host preferences, but exclude system and container stores.
+The three curated presets preserve captured values. All presets then apply the shared generation support checks, omitting unsupported top-level settings. They do not substitute recommended values. Desktop and input include matching user/any-host and user/current-host preferences, but exclude system and container stores.
 
 | Preset | Domain/mechanism | Included keys |
 | --- | --- | --- |

@@ -78,7 +78,7 @@ defaults {
 
 Boolean, integer, real, string, date, data, and archived UID stay distinct. Integers range from -2^63 through 2^64-1. Reals preserve signed zero and explicit #nan, #inf, and #-inf values. NaN payload bits have no KDL representation.
 
-Dates represent RFC 3339 instants and normalize offsets to UTC. Fractional seconds survive capture and KDL round trips. Generation rejects fractional dates rather than truncating them. Data is base64 with leading zero bytes retained. UIDs stay explicit even though generation cannot reproduce them.
+Dates represent RFC 3339 instants and normalize offsets to UTC. Fractional seconds survive KDL round trips in existing or edited documents; new captures omit fractional dates because generation has no verified faithful mapping. Data is base64 with leading zero bytes retained. Existing or edited UIDs stay explicit in KDL; new captures omit settings containing them. The same capture filter excludes other values or scopes unsupported by generation without changing the codec's types.
 
 Null is not an ordinary plist value. Unknown annotations, out-of-range values, malformed dates/base64, and ambiguous value shapes are errors.
 

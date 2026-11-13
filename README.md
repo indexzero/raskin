@@ -37,7 +37,7 @@ raskin capture --preset input -o input.kdl
 raskin capture --preset power -o power.kdl
 ~~~
 
-[Presets](docs/presets.md) define the exact selections. Broad capture is the default. KDL contains only captured settings. Unavailable values are omitted, like undefined object fields in JSON. Capture reports the saved file, captured counts, power profiles, and a compact summary of skipped sources on stderr. Add --verbose for per-source diagnostics.
+[Presets](docs/presets.md) define the exact selections. Broad capture is the default. KDL contains only settings that Raskin can generate. Capture and generation share support checks; unavailable or unsupported settings are omitted, like undefined object fields in JSON. If a nested value is unsupported, its complete top-level setting is omitted. Capture reports the saved file, captured counts, power profiles, and a compact summary of skipped sources on stderr. Add --verbose for per-source diagnostics.
 
 Generate from the synthetic example without reading this Mac:
 
@@ -94,7 +94,7 @@ Stable ordering makes ordinary diff tools and Git useful. Raskin does not need a
 
 Capture reads explicit persisted preferences, including user/global domains, current-host files, system files, app containers, and separate power profiles. It does not flush application caches or discover every effective default. Broad capture can contain private application state and machine-specific values.
 
-[Coverage](docs/coverage.md) lists supported and unsupported mechanisms. UIDs, fractional dates, exceptional reals, unsafe identities, and some scope combinations remain exact in KDL but cannot currently generate commands. Absolute paths inside values stay literal.
+[Coverage](docs/coverage.md) lists supported and unsupported mechanisms. New captures omit UIDs, fractional dates, exceptional reals, unsafe identities, unsupported scopes, and other settings without a supported native mapping. Existing or edited KDL containing those values remains readable and generation reports its skips. Absolute paths inside values stay literal.
 
 See the [user guide](docs/user-guide.md), [schema](docs/schema.md), and generated [command reference](docs/command-reference.md). The [usage specification](raskin.usage.kdl) is separate from preference KDL.
 

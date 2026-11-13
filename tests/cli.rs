@@ -546,3 +546,63 @@ fn old_skip_flag_matches_the_default_and_conflicts_with_strict() {
     let text = String::from_utf8(help.stdout).unwrap();
     assert!(text.contains("--strict") && !text.contains("--skip-unsupported"));
 }
+
+#[test]
+fn fresh_capture_omits_unsupported_settings_and_generates_strictly_without_skips() {
+    let tmp = temp();
+    let dir = tmp.path().canonicalize().unwrap();
+    capture_tree(&dir, "Battery Power:\n displaysleep 7\n womp 2\n");
+    let value = plist::Value::Dictionary(
+        [
+            ("keep".to_owned(), plist::Value::Boolean(true)),
+            ("uid".to_owned(), plist::Value::Uid(plist::Uid::new(42))),
+            (
+                "too-large".to_owned(),
+                plist::Value::Integer(u64::MAX.into()),
+            ),
+        ]
+        .into_iter()
+        .collect(),
+    );
+    let mut binary = Vec::new();
+    value.to_writer_binary(&mut binary).unwrap();
+    fs::write(dir.join("source/user/org.example.fixture.plist"), binary).unwrap();
+    let capture = cli(&["capture", "--from", "source", "-o", "filtered.kdl"], &dir);
+    assert!(
+        capture.status.success(),
+        "{}",
+        String::from_utf8_lossy(&capture.stderr)
+    );
+    let summary = String::from_utf8(capture.stderr).unwrap();
+    assert!(summary.contains("Captured 2 settings"));
+    assert!(summary.lines().count() <= 5);
+    let saved = fs::read_to_string(dir.join("filtered.kdl")).unwrap();
+    assert!(
+        !saved.contains("uid")
+            && !saved.contains("too-large")
+            && !saved.contains("womp")
+            && !saved.contains("unavailable")
+    );
+    let generated = cli(
+        &[
+            "generate",
+            "filtered.kdl",
+            "--strict",
+            "-o",
+            "filtered.macos",
+        ],
+        &dir,
+    );
+    assert!(
+        generated.status.success(),
+        "{}",
+        String::from_utf8_lossy(&generated.stderr)
+    );
+    let summary = String::from_utf8(generated.stderr).unwrap();
+    assert!(summary.starts_with("Saved script") && summary.contains("Generated 2 settings"));
+    assert!(!summary.contains("Skipped"));
+    let script = fs::read_to_string(dir.join("filtered.macos")).unwrap();
+    assert!(script.contains("'keep' -bool 'TRUE'"));
+    assert!(script.contains("/usr/bin/pmset -b 'displaysleep' '7'"));
+    assert!(!script.contains("# Skipped:"));
+}

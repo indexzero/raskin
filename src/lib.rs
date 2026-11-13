@@ -8,6 +8,7 @@ pub mod codec;
 mod error;
 pub mod model;
 pub mod render;
+mod support;
 
 pub use error::{Error, Result};
 pub use model::{Document, Domain, Host, Properties, Reason, Scope, Setting, Unavailable, Value};

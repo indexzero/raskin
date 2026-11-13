@@ -112,7 +112,7 @@ impl FromStr for Preset {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct CaptureReport {
-    /// Captured settings only; failed reads never become preference nodes.
+    /// Generatable settings only; failed reads and unsupported values are omitted.
     pub document: Document,
     /// Capture bookkeeping for callers, never serialized into the document.
     pub omissions: Vec<Unavailable>,
@@ -224,6 +224,7 @@ pub fn capture_with_reader(reader: &impl CaptureReader, preset: Preset) -> Resul
         }
         Preset::Power => capture.power(),
     }
+    capture.retain_supported();
     capture.document.validate()?;
     capture.omissions.sort();
     capture.omissions.dedup();
@@ -293,6 +294,38 @@ struct Capture<'a, R> {
     excluded_sources: usize,
 }
 impl<R: CaptureReader> Capture<'_, R> {
+    fn retain_supported(&mut self) {
+        let support = crate::support::analyze(&self.document);
+        for (domain, keys) in support.defaults {
+            if let Some(properties) = self.document.domains.get_mut(&domain) {
+                for key in keys {
+                    properties.remove(&key);
+                    self.omissions.push(Unavailable {
+                        source: format!("{} key {key:?}", domain.identity()),
+                        reason: Reason::Unsupported,
+                    });
+                }
+            }
+        }
+        for (profile, keys) in support.power {
+            if let Some(properties) = self.document.power.get_mut(&profile) {
+                for key in keys {
+                    properties.remove(&key);
+                    self.omissions.push(Unavailable {
+                        source: format!("pmset:{profile}/{key}"),
+                        reason: Reason::Unsupported,
+                    });
+                }
+            }
+        }
+        self.document
+            .domains
+            .retain(|_, properties| !properties.is_empty());
+        self.document
+            .power
+            .retain(|_, properties| !properties.is_empty());
+        self.diagnostics.extend(support.failures.diagnostics);
+    }
     fn unavailable(&mut self, source: String, reason: Reason, detail: impl fmt::Display) {
         self.diagnostics
             .push(format!("{source}: {}: {detail}", reason.as_str()));

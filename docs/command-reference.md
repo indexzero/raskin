@@ -11,7 +11,7 @@ Capture persisted macOS preferences as editable KDL, then generate a standalone 
 
 - **Usage:** `raskin capture [FLAGS]`
 
-Read explicit persisted user, host, system and container preferences plus native power profiles. Unavailable settings are omitted from KDL; capture diagnostics go to stderr. No settings are changed. With --from, only the supplied offline tree is read; there is no live fallback.
+Read explicit persisted user, host, system and container preferences plus native power profiles. Only settings supported by generation enter KDL; unavailable or unsupported settings are omitted and summarized on stderr. No settings are changed. With --from, only the supplied offline tree is read; there is no live fallback.
 
 ### Flags
 - **`-v --verbose`** — Show per-source capture diagnostics on stderr
