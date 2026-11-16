@@ -11,7 +11,7 @@ local linters = new Mapping<String, Step> {
         check = "cargo clippy --workspace --all-targets --locked -- -D warnings"
     }
     ["interface-docs"] {
-        glob = List("src/main.rs", "raskin.usage.kdl", "docs/**", "completions/**", "scripts/gen-docs.sh")
+        glob = List("src/main.rs", "src/presets.rs", "raskin.usage.kdl", "docs/**", "completions/**", "scripts/gen-docs.sh")
         check = "bash scripts/gen-docs.sh --check"
     }
 }

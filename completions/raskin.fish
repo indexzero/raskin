@@ -12,7 +12,7 @@ set _usage_spec_raskin 'name raskin
 bin raskin
 version "0.1.0"
 about "Read macOS preferences into KDL and generate native commands"
-long_about "Capture persisted macOS preferences as editable KDL, then generate a standalone .macos file. Raskin never executes generated commands. Capture is broad by default; desktop, input, and power select curated subsets."
+long_about "Capture persisted macOS preferences as editable KDL, then generate a standalone .macos file. Raskin never executes generated commands. Capture defaults to apple: macOS system categories plus Terminal. Select an individual category or use broad for the wider supported stores, including third-party apps."
 usage "Usage: raskin [COMMAND]"
 flag --usage-spec help="Emit the jdx/usage interface specification" hide=#true
 cmd capture help="Read persisted preferences into KDL" after_help=#"""
@@ -22,9 +22,9 @@ Examples:
 """# {
     long_help "Read explicit persisted user, host, system and container preferences plus native power profiles. Only settings supported by generation enter KDL; unavailable or unsupported settings are omitted and summarized on stderr. No settings are changed. With --from, only the supplied offline tree is read; there is no live fallback."
     flag "-v --verbose" help="Show per-source capture diagnostics on stderr"
-    flag --preset help="Capture broad settings or a curated subset" default=broad {
+    flag --preset help="Select Apple system categories plus Terminal, a category, or broad settings" default=apple {
         arg <PRESET> {
-            choices broad desktop input power
+            choices apple broad desktop input power appearance menubar windows accessibility language shortcuts search screenshots lockscreen notifications sound updates terminal
         }
     }
     flag --from help="Read an offline tree containing user/, system/, containers/, host-id.txt, and pmset.txt" {

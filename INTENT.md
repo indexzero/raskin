@@ -11,7 +11,7 @@ Raskin is named in honor of Jef Raskin. Its purpose is to memoize macOS preferen
 - **Outcome:** Capture macOS preferences as KDL and generate understandable `.macos` shell files from that saved data.
 - **User:** People capturing their Mac's preferences and reproducing them on another machine.
 - **Why now:** Existing migration approaches miss settings or make the migration tool itself demand too much attention. The missing battery display timeout is a concrete example.
-- **Success:** Broad capture by default, 2–3 curated portable presets, and a standalone generated script that needs no Raskin installation on the destination.
+- **Success:** Apple system categories plus Terminal by default, individually selectable categories, an explicit broad preset, and a standalone generated script that needs no Raskin installation on the destination.
 - **Constraints:** Rust implementation; KDL as the durable source; plist output only where macOS requires it; agent testing limited to generating and inspecting files.
 - **Out of scope:** Raskin executing settings changes, introducing separate application policies, providing a diff facility, or managing backup and transfer.
 
@@ -27,7 +27,7 @@ myprefs.macos  -- execute  --> human end user runs the native commands
 
 Capture and generation are separate. Saved KDL can be edited and used to regenerate a script without access to the original Mac. Backup and transfer use existing tools chosen by the user.
 
-Broad capture is the default. Raskin should also ship with 2–3 common presets for curated portable subsets. Their exact contents remain design work. Broad capture must account for omissions and unsupported settings rather than imply that every macOS setting was successfully recorded.
+Apple is the default: the union of system category presets plus Terminal. Other standalone Apple apps and third-party apps remain outside this selection. Broad remains available explicitly with its wider scope. Each selected domain retains supported unknown fields, including counters and learned state. Capture reports omissions and unsupported settings without implying complete coverage.
 
 KDL must retain the meaning of the captured data, including nested structure, value types, and relevant scope. Battery and charger values, for example, must remain distinguishable. A smaller representation is useful only if it preserves that meaning.
 
@@ -82,3 +82,7 @@ Generate supported settings by default, omitting complete unsupported top-level 
 ## Capture support clarification: 2026-11-12
 
 If generation cannot support a setting, capture must omit it. Capture and generation use the same support checks, including domain-wide encoding constraints. Unsupported nested data excludes its whole top-level setting; retained values are never altered to fit. This applies to every preset. New KDL contains supported settings only, and omissions remain capture diagnostics. Existing or edited KDL remains readable.
+
+## Apple preset clarification: 2026-11-16
+
+The owner confirmed Apple as the default, system categories plus Terminal, and retention of unknown supported fields. Apple composes all individual system categories and Terminal. Broad retains its previous wider scope. Domain selection replaces short key lists in desktop and input. Exact category selections and overlaps are documented in docs/presets.md. This supersedes the original broad default and two-or-three-preset limit. It changes no KDL syntax, native mappings, or execution boundary.

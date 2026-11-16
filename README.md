@@ -29,15 +29,19 @@ raskin capture -o myprefs.kdl
 raskin generate myprefs.kdl -o myprefs.macos
 ~~~
 
-Select a curated subset:
+Select a category or the wider capture:
 
 ~~~sh
 raskin capture --preset desktop -o desktop.kdl
 raskin capture --preset input -o input.kdl
 raskin capture --preset power -o power.kdl
+raskin capture --preset terminal -o terminal.kdl
+raskin capture --preset broad -o broad.kdl
 ~~~
 
-[Presets](docs/presets.md) define the exact selections. Broad capture is the default. KDL contains only settings that Raskin can generate. Capture and generation share support checks; unavailable or unsupported settings are omitted, like undefined object fields in JSON. If a nested value is unsupported, its complete top-level setting is omitted. Capture reports the saved file, captured counts, power profiles, and a compact summary of skipped sources on stderr. Add --verbose for per-source diagnostics.
+[Presets](docs/presets.md) define the exact selections. Apple is the default: all system category presets plus Terminal. Other standalone Apple apps and third-party apps require broad. Categories retain supported unknown fields and can overlap, especially through global preferences.
+
+KDL contains only settings that Raskin can generate. Capture and generation share support checks; unavailable or unsupported settings are omitted, like undefined object fields in JSON. If a nested value is unsupported, its complete top-level setting is omitted. Capture reports the saved file, captured counts, power profiles, and a compact summary of skipped sources on stderr. Add --verbose for per-source diagnostics.
 
 Generate from the synthetic example without reading this Mac:
 
@@ -92,7 +96,7 @@ Stable ordering makes ordinary diff tools and Git useful. Raskin does not need a
 
 ## Coverage and limits
 
-Capture reads explicit persisted preferences, including user/global domains, current-host files, system files, app containers, and separate power profiles. It does not flush application caches or discover every effective default. Broad capture can contain private application state and machine-specific values.
+Capture reads explicit persisted preferences, including user/global domains, current-host files, system files, app containers, and separate power profiles. It does not flush application caches or discover every effective default. Captures can contain private application state and machine-specific values.
 
 [Coverage](docs/coverage.md) lists supported and unsupported mechanisms. New captures omit UIDs, fractional dates, exceptional reals, unsafe identities, unsupported scopes, and other settings without a supported native mapping. Existing or edited KDL containing those values remains readable and generation reports its skips. Absolute paths inside values stay literal.
 

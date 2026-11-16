@@ -7,6 +7,7 @@ pub mod capture;
 pub mod codec;
 mod error;
 pub mod model;
+pub mod presets;
 pub mod render;
 mod support;
 

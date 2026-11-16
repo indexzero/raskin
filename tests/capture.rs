@@ -174,17 +174,32 @@ fn expected_keys(names: &[(&str, Host, &[&str])]) -> BTreeSet<(Domain, String)> 
 
 #[test]
 fn presets_have_exact_stable_names() {
-    for (name, expected) in [
-        ("broad", Preset::Broad),
-        ("desktop", Preset::Desktop),
-        ("input", Preset::Input),
-        ("power", Preset::Power),
-    ] {
-        assert_eq!(name.parse::<Preset>().unwrap(), expected);
-        assert_eq!(expected.to_string(), name);
-        assert_eq!(expected.as_str(), name);
+    let names = [
+        "apple",
+        "broad",
+        "desktop",
+        "input",
+        "power",
+        "appearance",
+        "menubar",
+        "windows",
+        "accessibility",
+        "language",
+        "shortcuts",
+        "search",
+        "screenshots",
+        "lockscreen",
+        "notifications",
+        "sound",
+        "updates",
+        "terminal",
+    ];
+    assert_eq!(Preset::all().map(Preset::as_str).collect::<Vec<_>>(), names);
+    for preset in Preset::all() {
+        assert_eq!(preset.as_str().parse::<Preset>().unwrap(), preset);
+        assert_eq!(preset.to_string(), preset.as_str());
     }
-    assert_eq!(Preset::default(), Preset::Broad);
+    assert_eq!(Preset::default(), Preset::Apple);
     assert!("Desktop".parse::<Preset>().is_err());
     assert!("all".parse::<Preset>().is_err());
 }
@@ -320,7 +335,7 @@ fn broad_preserves_supported_xml_binary_types_and_scoped_identities() {
 }
 
 #[test]
-fn desktop_preset_includes_exact_keys_and_retains_current_host_scope() {
+fn desktop_preset_retains_all_supported_fields_and_current_host_scope() {
     let report = capture_offline(&fixture_root(), Preset::Desktop).unwrap();
     assert_eq!(
         keys(&report),
@@ -337,7 +352,9 @@ fn desktop_preset_includes_exact_keys_and_retains_current_host_scope() {
                     "mineffect",
                     "show-recents",
                     "minimize-to-application",
-                    "mru-spaces"
+                    "mru-spaces",
+                    "location",
+                    "persistent-apps"
                 ]
             ),
             (
@@ -347,25 +364,36 @@ fn desktop_preset_includes_exact_keys_and_retains_current_host_scope() {
                     "AppleShowAllFiles",
                     "ShowPathbar",
                     "ShowStatusBar",
-                    "FXPreferredViewStyle"
+                    "FXPreferredViewStyle",
+                    "RecentFolders"
                 ]
             ),
             (
                 "com.apple.screencapture",
                 Host::Any,
-                &["type", "show-thumbnail", "showsClicks"]
+                &[
+                    "type",
+                    "show-thumbnail",
+                    "showsClicks",
+                    "location",
+                    "playsound"
+                ]
             ),
-            ("com.apple.dock", Host::Current, &["autohide"]),
+            (
+                "com.apple.dock",
+                Host::Current,
+                &["autohide", "persistent-apps"]
+            ),
         ])
     );
     assert!(report.document.power.is_empty());
     assert!(report.omissions.is_empty());
-    assert!(diagnostic(&report, "included 17 keys; filtered 6 keys"));
-    assert!(diagnostic(&report, "system and container stores"));
+    assert!(diagnostic(&report, "included 23 keys; filtered 0 keys"));
+    assert!(diagnostic(&report, "unselected domains and containers"));
 }
 
 #[test]
-fn input_preset_includes_exact_keys_without_container_or_system_values() {
+fn input_preset_retains_complete_supported_global_and_input_domains() {
     let report = capture_offline(&fixture_root(), Preset::Input).unwrap();
     assert_eq!(
         keys(&report),
@@ -377,29 +405,41 @@ fn input_preset_includes_exact_keys_without_container_or_system_values() {
                     "InitialKeyRepeat",
                     "KeyRepeat",
                     "AppleKeyboardUIMode",
-                    "com.apple.swipescrolldirection"
+                    "com.apple.swipescrolldirection",
+                    "AppleLanguages",
+                    "unrelated"
                 ]
             ),
             (
                 "com.apple.AppleMultitouchTrackpad",
                 Host::Any,
-                &["Clicking", "TrackpadRightClick", "TrackpadThreeFingerDrag"]
+                &[
+                    "Clicking",
+                    "TrackpadRightClick",
+                    "TrackpadThreeFingerDrag",
+                    "unrelated"
+                ]
             ),
             (
                 "com.apple.driver.AppleBluetoothMultitouch.trackpad",
                 Host::Any,
-                &["Clicking", "TrackpadRightClick", "TrackpadThreeFingerDrag"]
+                &[
+                    "Clicking",
+                    "TrackpadRightClick",
+                    "TrackpadThreeFingerDrag",
+                    "unrelated"
+                ]
             ),
             (
                 "com.apple.AppleMultitouchTrackpad",
                 Host::Current,
-                &["Clicking", "TrackpadThreeFingerDrag"]
+                &["Clicking", "TrackpadThreeFingerDrag", "unrelated"]
             ),
         ])
     );
     assert!(report.document.power.is_empty());
     assert!(report.omissions.is_empty());
-    assert!(diagnostic(&report, "included 12 keys; filtered 5 keys"));
+    assert!(diagnostic(&report, "included 17 keys; filtered 0 keys"));
 }
 
 #[test]
@@ -432,7 +472,10 @@ fn power_preset_reads_only_power_and_presets_do_not_report_excluded_providers_fa
     for preset in [Preset::Desktop, Preset::Input] {
         let reader = MockReader::default();
         let report = capture_with_reader(&reader, preset).unwrap();
-        assert_eq!(reader.reads.borrow().as_slice(), &["dir:user"]);
+        assert_eq!(
+            reader.reads.borrow().as_slice(),
+            &["dir:user", "dir:system", "dir:containers"]
+        );
         assert!(report.omissions.is_empty());
         assert!(diagnostic(&report, "exclusions:"));
     }
@@ -837,7 +880,10 @@ fn reader_paths_cannot_escape_or_convert_special_entries_into_files() {
         "defaults:user/ByHost",
         Reason::Unsupported
     ));
-    assert_eq!(reader.reads.borrow().as_slice(), &["dir:user"]);
+    assert_eq!(
+        reader.reads.borrow().as_slice(),
+        &["dir:user", "dir:system", "dir:containers"]
+    );
 }
 
 #[cfg(unix)]
@@ -982,7 +1028,7 @@ fn assert_capture_generates(report: &CaptureReport) {
 
 #[test]
 fn every_capture_preset_roundtrips_into_strict_generation() {
-    for preset in [Preset::Broad, Preset::Desktop, Preset::Input, Preset::Power] {
+    for preset in Preset::all() {
         assert_capture_generates(&capture_offline(&fixture_root(), preset).unwrap());
     }
 }
@@ -1167,7 +1213,7 @@ fn capture_omits_power_values_outside_native_ranges_and_empty_profiles() {
 }
 
 #[test]
-fn curated_capture_checks_only_selected_keys_for_generation_support() {
+fn category_capture_checks_all_fields_in_selected_domains_for_generation_support() {
     use plist::Value as P;
     let mut reader = MockReader::default();
     reader.file(
@@ -1203,9 +1249,19 @@ fn curated_capture_checks_only_selected_keys_for_generation_support() {
                 .collect::<Vec<_>>(),
             [keep]
         );
-        assert_eq!(report.omissions.len(), 1);
-        assert!(report.omissions[0].source.contains(omit));
-        assert!(!report.omissions[0].source.contains("cache"));
+        assert_eq!(report.omissions.len(), 2);
+        assert!(
+            report
+                .omissions
+                .iter()
+                .any(|item| item.source.contains(omit))
+        );
+        assert!(
+            report
+                .omissions
+                .iter()
+                .any(|item| item.source.contains("cache"))
+        );
         assert_capture_generates(&report);
     }
 }
@@ -1263,4 +1319,212 @@ fn capture_omits_empty_collections_whose_child_block_exceeds_the_depth_limit() {
         .unwrap()
         .join()
         .unwrap();
+}
+
+#[test]
+fn categories_retain_supported_unknown_fields_and_values() {
+    use plist::Value as P;
+    let samples = [
+        (Preset::Desktop, "com.apple.finder"),
+        (Preset::Input, "com.apple.AppleMultitouchMouse"),
+        (Preset::Appearance, "NSGlobalDomain"),
+        (Preset::Menubar, "com.apple.controlcenter"),
+        (Preset::Windows, "com.apple.WindowManager"),
+        (Preset::Accessibility, "com.apple.universalaccess"),
+        (
+            Preset::Language,
+            "com.apple.textInput.keyboardServices.textReplacement",
+        ),
+        (Preset::Shortcuts, "com.apple.symbolichotkeys"),
+        (Preset::Search, "com.apple.Spotlight"),
+        (Preset::Screenshots, "com.apple.screencaptureui"),
+        (Preset::Lockscreen, "com.apple.screensaver"),
+        (Preset::Notifications, "com.apple.ncprefs"),
+        (Preset::Sound, "com.apple.ComfortSounds"),
+        (Preset::Updates, "com.apple.SoftwareUpdate"),
+        (Preset::Terminal, "com.apple.Terminal"),
+    ];
+    let mut reader = MockReader::default();
+    for (_, name) in samples {
+        let stem = if name == "NSGlobalDomain" {
+            ".GlobalPreferences"
+        } else {
+            name
+        };
+        reader.file(
+            format!("user/{stem}.plist"),
+            Ok(binary_bytes(&[
+                (
+                    "future-field",
+                    P::String("unchanged synthetic value".into()),
+                ),
+                ("useCount", P::Integer(37.into())),
+                (
+                    "learned-state",
+                    P::Dictionary([("weight".to_owned(), P::Real(0.25))].into_iter().collect()),
+                ),
+                ("unsupported", P::Uid(plist::Uid::new(1))),
+            ])),
+        );
+    }
+    for (preset, name) in samples {
+        reader.reads.borrow_mut().clear();
+        let report = capture_with_reader(&reader, preset).unwrap();
+        let properties = &report.document.domains[&Domain::user(name)];
+        assert_eq!(properties.len(), 3, "{preset}");
+        assert_eq!(
+            properties["future-field"].value,
+            Value::String("unchanged synthetic value".into())
+        );
+        assert_eq!(properties["useCount"].value, Value::Integer(37));
+        assert_eq!(
+            properties["learned-state"].value,
+            Value::Dict([("weight".into(), Value::Real(0.25).into())].into())
+        );
+        assert!(
+            !reader.reads.borrow().iter().any(|read| read == "pmset"),
+            "{preset}"
+        );
+        assert_capture_generates(&report);
+    }
+}
+
+#[test]
+fn apple_is_exactly_the_union_of_complete_category_source_selections() {
+    let mut reader = MockReader::default();
+    for path in [
+        "user/.GlobalPreferences.plist",
+        "user/com.apple.dock.plist",
+        "user/com.apple.finder.plist",
+        "user/com.apple.Terminal.plist",
+        "user/com.apple.SoftwareUpdate.plist",
+        "system/com.apple.SoftwareUpdate.plist",
+        "user/com.apple.Spotlight.plist",
+        "user/com.apple.HIToolbox.plist",
+        "user/com.apple.screencaptureui.plist",
+        "containers/com.apple.Terminal/com.apple.Terminal.plist",
+        "containers/com.apple.controlcenter/com.apple.controlcenter.plist",
+        "containers/com.apple.WindowManager/.GlobalPreferences.plist",
+        // These crossed pairs must not appear in Apple's union.
+        "containers/com.apple.Terminal/.GlobalPreferences.plist",
+        "containers/com.apple.Terminal/com.apple.finder.plist",
+        "containers/com.apple.finder/com.apple.Terminal.plist",
+        // Neither standalone Apple apps nor third-party apps belong to Apple.
+        "user/com.apple.Safari.plist",
+        "user/com.apple.mail.plist",
+        "user/com.apple.Music.plist",
+        "user/com.apple.finder-extra.plist",
+        "user/com.apple.Terminal.extra.plist",
+        "user/com.apple.terminal.plist",
+        "user/com.raycast.macos.plist",
+        "containers/com.apple.Safari/com.apple.finder.plist",
+        "containers/com.raycast.macos/.GlobalPreferences.plist",
+    ] {
+        reader.file(path, Ok(simple()));
+    }
+    reader.file(
+        format!("user/ByHost/com.apple.dock.{UUID}.plist"),
+        Ok(simple()),
+    );
+    let mut union = raskin::Document::default();
+    for &preset in Preset::CATEGORIES {
+        let report = capture_with_reader(&reader, preset).unwrap();
+        for (domain, properties) in report.document.domains {
+            if let Some(previous) = union.domains.insert(domain, properties.clone()) {
+                assert_eq!(previous, properties);
+            }
+        }
+        union.power.extend(report.document.power);
+    }
+    reader.reads.borrow_mut().clear();
+    let apple = capture_with_reader(&reader, Preset::Apple).unwrap();
+    assert_eq!(apple.document, union);
+    assert!(apple.omissions.is_empty());
+    assert_eq!(apple.document.domains.len(), 13);
+    assert_eq!(apple.document.power.len(), 2);
+    assert!(apple.document.domains.contains_key(&domain(
+        "com.apple.SoftwareUpdate",
+        Scope::System,
+        Host::Any,
+        None
+    )));
+    assert!(apple.document.domains.contains_key(&domain(
+        "com.apple.dock",
+        Scope::User,
+        Host::Current,
+        None
+    )));
+    assert!(apple.document.domains.contains_key(&domain(
+        "com.apple.Terminal",
+        Scope::User,
+        Host::Any,
+        Some("com.apple.Terminal")
+    )));
+    let reads = reader.reads.borrow().clone();
+    assert_eq!(
+        reads.len(),
+        reads.iter().collect::<BTreeSet<_>>().len(),
+        "Each source is read once"
+    );
+    for excluded in [
+        "file:containers/com.apple.Terminal/.GlobalPreferences.plist",
+        "file:containers/com.apple.Terminal/com.apple.finder.plist",
+        "file:containers/com.apple.finder/com.apple.Terminal.plist",
+        "dir:containers/com.apple.Safari",
+        "dir:containers/com.raycast.macos",
+        "file:user/com.apple.Safari.plist",
+        "file:user/com.apple.mail.plist",
+        "file:user/com.apple.Music.plist",
+        "file:user/com.apple.finder-extra.plist",
+        "file:user/com.apple.Terminal.extra.plist",
+        "file:user/com.apple.terminal.plist",
+        "file:user/com.raycast.macos.plist",
+        "dir:group-containers",
+    ] {
+        assert!(!reads.iter().any(|read| read == excluded), "{excluded}");
+    }
+    assert_capture_generates(&apple);
+    // Broad keeps the same wider source support, including the crossed pairs.
+    let broad = capture_with_reader(&reader, Preset::Broad).unwrap();
+    assert_eq!(broad.document.domains.len(), 25);
+    assert!(
+        broad
+            .document
+            .domains
+            .contains_key(&Domain::user("com.raycast.macos"))
+    );
+    assert!(broad.document.domains.contains_key(&domain(
+        "NSGlobalDomain",
+        Scope::User,
+        Host::Any,
+        Some("com.apple.Terminal")
+    )));
+}
+
+#[test]
+fn apple_and_categories_keep_existing_scope_support_limits() {
+    let mut reader = MockReader::default();
+    reader.file(
+        format!("system/ByHost/com.apple.SoftwareUpdate.{UUID}.plist"),
+        Ok(simple()),
+    );
+    reader.file(
+        format!("containers/com.apple.Terminal/ByHost/com.apple.Terminal.{UUID}.plist"),
+        Ok(simple()),
+    );
+    reader.file(
+        "user/com.apple.finder.plist",
+        Err(io::ErrorKind::PermissionDenied),
+    );
+    for preset in [
+        Preset::Apple,
+        Preset::Updates,
+        Preset::Terminal,
+        Preset::Desktop,
+    ] {
+        let report = capture_with_reader(&reader, preset).unwrap();
+        assert!(report.document.domains.is_empty());
+        assert!(!report.omissions.is_empty());
+        assert_capture_generates(&report);
+    }
 }

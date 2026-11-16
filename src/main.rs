@@ -15,7 +15,7 @@ use std::{
 #[command(
     version,
     about = "Read macOS preferences into KDL and generate native commands",
-    long_about = "Capture persisted macOS preferences as editable KDL, then generate a standalone .macos file. Raskin never executes generated commands. Capture is broad by default; desktop, input, and power select curated subsets.",
+    long_about = "Capture persisted macOS preferences as editable KDL, then generate a standalone .macos file. Raskin never executes generated commands. Capture defaults to apple: macOS system categories plus Terminal. Select an individual category or use broad for the wider supported stores, including third-party apps.",
     arg_required_else_help = true,
     after_help = "Examples:\n  raskin capture -o myprefs.kdl\n  raskin capture --preset desktop -o desktop.kdl\n  raskin generate myprefs.kdl -o myprefs.macos\n\nReview the generated file before running it yourself. See docs/coverage.md for limits."
 )]
@@ -37,8 +37,8 @@ enum Commands {
         /// Show per-source capture diagnostics on stderr.
         #[arg(short, long)]
         verbose: bool,
-        /// Capture broad settings or a curated subset.
-        #[arg(long, default_value="broad", value_parser=["broad","desktop","input","power"])]
+        /// Select Apple system categories plus Terminal, a category, or broad settings.
+        #[arg(long, default_value=Preset::default().as_str(), value_parser=clap::builder::PossibleValuesParser::new(Preset::all().map(Preset::as_str)))]
         preset: String,
         /// Read an offline tree containing user/, system/, containers/, host-id.txt, and pmset.txt.
         #[arg(long, value_name="DIRECTORY", value_hint=ValueHint::DirPath)]
@@ -120,12 +120,7 @@ fn run(cli: Cli) -> Result<()> {
             output,
             force,
         }) => {
-            let preset = match preset.as_str() {
-                "desktop" => Preset::Desktop,
-                "input" => Preset::Input,
-                "power" => Preset::Power,
-                _ => Preset::Broad,
-            };
+            let preset = preset.parse::<Preset>()?;
             let report = match from {
                 Some(root) => capture::capture_offline(&root, preset)?,
                 None => capture::capture_live(preset)?,

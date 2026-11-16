@@ -198,7 +198,18 @@ fn offline_capture_then_generate_uses_only_the_supplied_tree() {
         "Battery Power:\n displaysleep 2\nAC Power:\n displaysleep 10\n",
     )
     .unwrap();
-    let out = cli(&["capture", "--from", "source", "-o", "captured.kdl"], &dir);
+    let out = cli(
+        &[
+            "capture",
+            "--preset",
+            "broad",
+            "--from",
+            "source",
+            "-o",
+            "captured.kdl",
+        ],
+        &dir,
+    );
     assert!(
         out.status.success(),
         "{}",
@@ -242,7 +253,18 @@ fn capture_reports_partial_success_concisely_and_keeps_diagnostics_out_of_kdl() 
         )
         .unwrap();
     }
-    let normal = cli(&["capture", "--from", "source", "-o", "normal.kdl"], &dir);
+    let normal = cli(
+        &[
+            "capture",
+            "--preset",
+            "broad",
+            "--from",
+            "source",
+            "-o",
+            "normal.kdl",
+        ],
+        &dir,
+    );
     assert!(normal.status.success());
     assert!(normal.stdout.is_empty());
     let summary = String::from_utf8(normal.stderr).unwrap();
@@ -261,6 +283,8 @@ fn capture_reports_partial_success_concisely_and_keeps_diagnostics_out_of_kdl() 
     let verbose = cli(
         &[
             "capture",
+            "--preset",
+            "broad",
             "--from",
             "source",
             "--verbose",
@@ -277,7 +301,7 @@ fn capture_reports_partial_success_concisely_and_keeps_diagnostics_out_of_kdl() 
     assert!(details.contains("Sleep On Power Button"));
     assert!(details.lines().count() > 200);
 
-    let stdout = cli(&["capture", "--from", "source"], &dir);
+    let stdout = cli(&["capture", "--preset", "broad", "--from", "source"], &dir);
     assert!(stdout.status.success());
     assert_eq!(stdout.stdout, saved.as_bytes());
     assert!(
@@ -294,7 +318,12 @@ fn failed_capture_write_does_not_claim_that_a_capture_was_saved() {
     capture_tree(&dir, "Battery Power:\n displaysleep 7\n");
     fs::write(dir.join("exists.kdl"), "keep me").unwrap();
     for output in ["exists.kdl", "missing/output.kdl"] {
-        let result = cli(&["capture", "--from", "source", "-o", output], &dir);
+        let result = cli(
+            &[
+                "capture", "--preset", "broad", "--from", "source", "-o", output,
+            ],
+            &dir,
+        );
         assert!(!result.status.success());
         let message = String::from_utf8(result.stderr).unwrap();
         assert!(message.starts_with("error:"), "{message}");
@@ -315,7 +344,18 @@ fn failed_power_profile_remains_visible_in_the_short_capture_summary() {
         &dir,
         "Battery Power:\n displaysleep invalid\nAC Power:\n displaysleep 42\n",
     );
-    let result = cli(&["capture", "--from", "source", "-o", "partial.kdl"], &dir);
+    let result = cli(
+        &[
+            "capture",
+            "--preset",
+            "broad",
+            "--from",
+            "source",
+            "-o",
+            "partial.kdl",
+        ],
+        &dir,
+    );
     assert!(result.status.success());
     let message = String::from_utf8(result.stderr).unwrap();
     assert!(message.contains("Saved partial capture"));
@@ -567,7 +607,18 @@ fn fresh_capture_omits_unsupported_settings_and_generates_strictly_without_skips
     let mut binary = Vec::new();
     value.to_writer_binary(&mut binary).unwrap();
     fs::write(dir.join("source/user/org.example.fixture.plist"), binary).unwrap();
-    let capture = cli(&["capture", "--from", "source", "-o", "filtered.kdl"], &dir);
+    let capture = cli(
+        &[
+            "capture",
+            "--preset",
+            "broad",
+            "--from",
+            "source",
+            "-o",
+            "filtered.kdl",
+        ],
+        &dir,
+    );
     assert!(
         capture.status.success(),
         "{}",
@@ -605,4 +656,84 @@ fn fresh_capture_omits_unsupported_settings_and_generates_strictly_without_skips
     assert!(script.contains("'keep' -bool 'TRUE'"));
     assert!(script.contains("/usr/bin/pmset -b 'displaysleep' '7'"));
     assert!(!script.contains("# Skipped:"));
+}
+
+#[test]
+fn capture_defaults_to_apple_and_keeps_broad_explicit() {
+    use raskin::{
+        Domain,
+        capture::{self, Preset},
+    };
+    let tmp = temp();
+    let dir = tmp.path().canonicalize().unwrap();
+    capture_tree(
+        &dir,
+        "Battery Power:\n displaysleep 7\nAC Power:\n displaysleep 11\n",
+    );
+    for store in ["system", "containers", "group-containers"] {
+        fs::create_dir_all(dir.join("source").join(store)).unwrap();
+    }
+    let xml = r#"<?xml version="1.0"?><plist version="1.0"><dict><key>future-key</key><integer>37</integer></dict></plist>"#;
+    for name in [
+        "com.apple.finder",
+        "com.apple.Terminal",
+        "com.apple.Safari",
+        "com.raycast.macos",
+    ] {
+        fs::write(dir.join(format!("source/user/{name}.plist")), xml).unwrap();
+    }
+    let default = cli(&["capture", "--from", "source"], &dir);
+    let explicit = cli(&["capture", "--from", "source", "--preset", "apple"], &dir);
+    assert!(default.status.success() && explicit.status.success());
+    assert_eq!(default.stdout, explicit.stdout);
+    assert_eq!(default.stderr, explicit.stderr);
+    let doc = codec::decode(std::str::from_utf8(&default.stdout).unwrap(), "default.kdl").unwrap();
+    assert_eq!(doc.domains.len(), 2);
+    assert!(doc.domains.contains_key(&Domain::user("com.apple.finder")));
+    assert!(
+        doc.domains
+            .contains_key(&Domain::user("com.apple.Terminal"))
+    );
+    assert_eq!(doc.power.len(), 2);
+    let summary = String::from_utf8(default.stderr).unwrap();
+    assert!(summary.contains("Preset: apple."));
+    assert!(!summary.contains("partial"));
+    assert!(summary.lines().count() <= 3);
+
+    for preset in Preset::all() {
+        let result = cli(
+            &["capture", "--from", "source", "--preset", preset.as_str()],
+            &dir,
+        );
+        assert!(
+            result.status.success(),
+            "{preset}: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let expected = capture::capture_offline(&dir.join("source"), preset).unwrap();
+        assert_eq!(
+            result.stdout,
+            codec::encode(&expected.document).unwrap().as_bytes(),
+            "{preset}"
+        );
+    }
+    let broad = cli(&["capture", "--from", "source", "--preset", "broad"], &dir);
+    let doc = codec::decode(std::str::from_utf8(&broad.stdout).unwrap(), "broad.kdl").unwrap();
+    assert_eq!(doc.domains.len(), 5);
+    assert!(doc.domains.contains_key(&Domain::user("com.raycast.macos")));
+    let bad = cli(&["capture", "--from", "source", "--preset", "appl"], &dir);
+    assert!(!bad.status.success() && bad.stdout.is_empty());
+    let help = cli(&["capture", "--help"], &dir);
+    let help = String::from_utf8(help.stdout).unwrap();
+    assert!(help.contains("[default: apple]"));
+    let spec = cli(&["--usage-spec"], &dir);
+    let spec = String::from_utf8(spec.stdout).unwrap();
+    assert!(spec.contains("default=apple"));
+    for preset in Preset::all() {
+        assert!(help.contains(preset.as_str()), "{preset}");
+        assert!(
+            spec.split_whitespace().any(|word| word == preset.as_str()),
+            "{preset}"
+        );
+    }
 }

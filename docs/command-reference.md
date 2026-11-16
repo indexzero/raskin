@@ -2,7 +2,7 @@
 # `raskin`
 - **Version:** 0.1.0
 
-Capture persisted macOS preferences as editable KDL, then generate a standalone .macos file. Raskin never executes generated commands. Capture is broad by default; desktop, input, and power select curated subsets.
+Capture persisted macOS preferences as editable KDL, then generate a standalone .macos file. Raskin never executes generated commands. Capture defaults to apple: macOS system categories plus Terminal. Select an individual category or use broad for the wider supported stores, including third-party apps.
 
 
 - **Usage:** `raskin [SUBCOMMAND]`
@@ -15,11 +15,11 @@ Read explicit persisted user, host, system and container preferences plus native
 
 ### Flags
 - **`-v --verbose`** — Show per-source capture diagnostics on stderr
-- **`--preset <PRESET>`** — Capture broad settings or a curated subset
+- **`--preset <PRESET>`** — Select Apple system categories plus Terminal, a category, or broad settings
 
-  **Choices:** `broad`, `desktop`, `input`, `power`
+  **Choices:** `apple`, `broad`, `desktop`, `input`, `power`, `appearance`, `menubar`, `windows`, `accessibility`, `language`, `shortcuts`, `search`, `screenshots`, `lockscreen`, `notifications`, `sound`, `updates`, `terminal`
 
-  **Default:** `broad`
+  **Default:** `apple`
 - **`--from <DIRECTORY>`** — Read an offline tree containing user/, system/, containers/, host-id.txt, and pmset.txt
 - **`-o --output <FILE>`** — Write KDL to this path; otherwise use stdout
 - **`--force`** — Atomically replace an existing output file

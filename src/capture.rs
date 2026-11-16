@@ -9,106 +9,13 @@ use std::fmt;
 use std::fs;
 use std::io::{self, Cursor, Read};
 use std::path::{Component, Path, PathBuf};
-use std::str::FromStr;
 
 use crate::model::{MAX_DEPTH, MAX_DOCUMENT_BYTES, power_key_supported};
 use crate::{
     Document, Domain, Error, Host, Properties, Reason, Result, Scope, Setting, Unavailable, Value,
 };
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Preset {
-    #[default]
-    Broad,
-    Desktop,
-    Input,
-    Power,
-}
-impl Preset {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Broad => "broad",
-            Self::Desktop => "desktop",
-            Self::Input => "input",
-            Self::Power => "power",
-        }
-    }
-    fn includes_domain(self, name: &str) -> bool {
-        match self {
-            Self::Broad => true,
-            Self::Desktop => matches!(
-                name,
-                "com.apple.dock" | "com.apple.finder" | "com.apple.screencapture"
-            ),
-            Self::Input => matches!(
-                name,
-                "NSGlobalDomain"
-                    | "com.apple.AppleMultitouchTrackpad"
-                    | "com.apple.driver.AppleBluetoothMultitouch.trackpad"
-            ),
-            Self::Power => false,
-        }
-    }
-    fn includes_key(self, domain: &str, key: &str) -> bool {
-        match (self, domain) {
-            (Self::Broad, _) => true,
-            (Self::Desktop, "com.apple.dock") => matches!(
-                key,
-                "autohide"
-                    | "orientation"
-                    | "tilesize"
-                    | "magnification"
-                    | "largesize"
-                    | "mineffect"
-                    | "show-recents"
-                    | "minimize-to-application"
-                    | "mru-spaces"
-            ),
-            (Self::Desktop, "com.apple.finder") => matches!(
-                key,
-                "AppleShowAllFiles" | "ShowPathbar" | "ShowStatusBar" | "FXPreferredViewStyle"
-            ),
-            (Self::Desktop, "com.apple.screencapture") => {
-                matches!(key, "type" | "show-thumbnail" | "showsClicks")
-            }
-            (Self::Input, "NSGlobalDomain") => matches!(
-                key,
-                "InitialKeyRepeat"
-                    | "KeyRepeat"
-                    | "AppleKeyboardUIMode"
-                    | "com.apple.swipescrolldirection"
-            ),
-            (
-                Self::Input,
-                "com.apple.AppleMultitouchTrackpad"
-                | "com.apple.driver.AppleBluetoothMultitouch.trackpad",
-            ) => matches!(
-                key,
-                "Clicking" | "TrackpadRightClick" | "TrackpadThreeFingerDrag"
-            ),
-            _ => false,
-        }
-    }
-}
-impl fmt::Display for Preset {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-impl FromStr for Preset {
-    type Err = Error;
-    fn from_str(value: &str) -> Result<Self> {
-        match value {
-            "broad" => Ok(Self::Broad),
-            "desktop" => Ok(Self::Desktop),
-            "input" => Ok(Self::Input),
-            "power" => Ok(Self::Power),
-            _ => Err(Error::Invalid(format!(
-                "unknown preset {value:?}; expected broad, desktop, input, or power"
-            ))),
-        }
-    }
-}
+pub use crate::presets::Preset;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct CaptureReport {
@@ -200,29 +107,30 @@ pub fn capture_with_reader(reader: &impl CaptureReader, preset: Preset) -> Resul
         host: None,
         host_attempted: false,
         sources: BTreeMap::new(),
-        filtered_keys: 0,
         excluded_sources: 0,
     };
-    match preset {
-        Preset::Broad => {
-            capture.resolve_host();
-            capture.preferences(Path::new("user"), Scope::User, None, false);
-            capture.preferences(Path::new("system"), Scope::System, None, false);
-            capture.containers();
-            capture.group_containers();
-            capture.power();
-            for provider in UNSUPPORTED_PROVIDERS {
-                capture.unavailable(
-                    format!("provider:{provider}"),
-                    Reason::Unsupported,
-                    "dedicated provider is outside persisted defaults and pmset capture",
-                );
-            }
+    if preset == Preset::Broad {
+        capture.resolve_host();
+    }
+    if preset.includes_preferences() {
+        capture.preferences(Path::new("user"), Scope::User, None, false);
+        capture.preferences(Path::new("system"), Scope::System, None, false);
+        capture.containers();
+    }
+    if preset == Preset::Broad {
+        capture.group_containers();
+    }
+    if preset.includes_power() {
+        capture.power();
+    }
+    if preset == Preset::Broad {
+        for provider in UNSUPPORTED_PROVIDERS {
+            capture.unavailable(
+                format!("provider:{provider}"),
+                Reason::Unsupported,
+                "dedicated provider is outside persisted defaults and pmset capture",
+            );
         }
-        Preset::Desktop | Preset::Input => {
-            capture.preferences(Path::new("user"), Scope::User, None, false)
-        }
-        Preset::Power => capture.power(),
     }
     capture.retain_supported();
     capture.document.validate()?;
@@ -239,17 +147,15 @@ pub fn capture_with_reader(reader: &impl CaptureReader, preset: Preset) -> Resul
         Preset::Broad => {
             "none by preset; unsupported providers and unavailable sources are listed separately"
         }
-        Preset::Desktop => {
-            "non-desktop keys/domains, system and container stores, group containers, power and dedicated providers"
-        }
-        Preset::Input => {
-            "non-input keys/domains, system and container stores, group containers, power and dedicated providers"
-        }
         Preset::Power => {
             "all preference stores, group containers and non-power dedicated providers"
         }
+        Preset::Apple => {
+            "unselected domains and containers, group containers and dedicated providers other than power"
+        }
+        _ => "unselected domains and containers, group containers, power and dedicated providers",
     };
-    capture.diagnostics.push(format!("preset {preset}: included {included} keys; filtered {} keys in selected domains; intentionally excluded {} discovered sources; exclusions: {exclusions}", capture.filtered_keys, capture.excluded_sources));
+    capture.diagnostics.push(format!("preset {preset}: included {included} keys; filtered 0 keys in selected domains; intentionally excluded {} discovered sources; exclusions: {exclusions}", capture.excluded_sources));
     Ok(CaptureReport {
         document: capture.document,
         omissions: capture.omissions,
@@ -290,7 +196,6 @@ struct Capture<'a, R> {
     host: Option<String>,
     host_attempted: bool,
     sources: BTreeMap<Domain, String>,
-    filtered_keys: usize,
     excluded_sources: usize,
 }
 impl<R: CaptureReader> Capture<'_, R> {
@@ -452,7 +357,7 @@ impl<R: CaptureReader> Capture<'_, R> {
             } else {
                 raw_domain
             };
-            if !self.preset.includes_domain(name) {
+            if !self.preset.includes_source(name, container) {
                 self.excluded_sources += 1;
                 continue;
             }
@@ -542,7 +447,7 @@ impl<R: CaptureReader> Capture<'_, R> {
                     continue;
                 }
             };
-            let mut properties = match parse_plist(&bytes) {
+            let properties = match parse_plist(&bytes) {
                 Ok(Value::Dict(properties)) => properties,
                 Ok(_) => {
                     self.unavailable(
@@ -567,12 +472,7 @@ impl<R: CaptureReader> Capture<'_, R> {
                 ));
                 continue;
             }
-            let before = properties.len();
-            properties.retain(|key, _| self.preset.includes_key(name, key));
-            self.filtered_keys += before - properties.len();
-            if !properties.is_empty() {
-                self.document.domains.insert(domain, properties);
-            }
+            self.document.domains.insert(domain, properties);
         }
     }
     fn containers(&mut self) {
@@ -584,6 +484,15 @@ impl<R: CaptureReader> Capture<'_, R> {
             let Some(container_path) = self.entry_path(path, &entry) else {
                 continue;
             };
+            if self.preset != Preset::Broad
+                && !entry
+                    .name
+                    .to_str()
+                    .is_some_and(|id| self.preset.includes_container(id))
+            {
+                self.excluded_sources += 1;
+                continue;
+            }
             let source = format!("defaults:{}", container_path.display());
             match (entry.name.to_str(), entry.kind) {
                 (Some(id), EntryKind::Directory) => {

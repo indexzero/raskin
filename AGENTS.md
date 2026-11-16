@@ -22,7 +22,7 @@ Execution is a human end-user activity outside agent testing. Do not claim that 
 
 - Raskin reads macOS preferences into KDL and generates `.macos` files from saved KDL. It does not apply KDL or execute the generated commands.
 - Native commands define their own behavior. Do not introduce separate application, merge, conflict-resolution, or replay policies.
-- Capture broadly by default and provide 2–3 curated portable presets.
+- Default to apple: the union of macOS system categories plus Terminal. Keep broad available with its wider scope. Retain supported unknown fields within selected domains.
 - The generated script stands alone; the destination does not need Raskin. Produce plist output only where macOS itself requires it.
 - Do not add a diff facility. Document fresh capture/generation followed by ordinary file comparison in the README.
 - Backup and transfer belong to the user's existing tools.
