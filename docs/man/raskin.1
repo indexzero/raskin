@@ -4,7 +4,7 @@ raskin \- Read macOS preferences into KDL and generate native commands
 .SH SYNOPSIS
 \fBraskin\fR [COMMAND]
 .SH DESCRIPTION
-Capture persisted macOS preferences as editable KDL, then generate a standalone .macos file. Raskin never executes generated commands. Capture defaults to apple: macOS system categories plus Terminal. Select an individual category or use broad for the wider supported stores, including third\-party apps.
+Capture persisted macOS preferences as editable KDL, then generate a standalone .macos file. Raskin never executes generated commands. Capture defaults to apple: macOS system categories plus Terminal. Select a built\-in category, use broad for wider stores, or pass \-p FILE to capture exact keys from a KDL preset.
 .PP
 .SH OPTIONS
 .TP
@@ -28,8 +28,12 @@ Read explicit persisted user, host, system and container preferences plus native
 \fB\-v, \-\-verbose\fR
 Show per\-source capture diagnostics on stderr
 .TP
-\fB\-\-preset\fR \fI<PRESET>\fR
-Select Apple system categories plus Terminal, a category, or broad settings
+\fB\-p, \-\-preset\fR \fI<NAME_OR_FILE>\fR
+Select a built\-in preset or a KDL file listing exact keys. A file defines the complete selection.
+
+Built\-in presets: apple broad desktop input power appearance menubar windows accessibility language shortcuts search screenshots lockscreen notifications sound updates terminal
+
+Use ./NAME for a file whose name matches a built\-in preset.
 .RS
 \fIDefault: \fRapple
 .RE

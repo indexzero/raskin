@@ -86,3 +86,13 @@ If generation cannot support a setting, capture must omit it. Capture and genera
 ## Apple preset clarification: 2026-11-16
 
 The owner confirmed Apple as the default, system categories plus Terminal, and retention of unknown supported fields. Apple composes all individual system categories and Terminal. Broad retains its previous wider scope. Domain selection replaces short key lists in desktop and input. Exact category selections and overlaps are documented in docs/presets.md. This supersedes the original broad default and two-or-three-preset limit. It changes no KDL syntax, native mappings, or execution boundary.
+
+
+## File preset clarification: 2026-11-17
+
+File-defined presets select the exact top-level keys the user cares about.
+The key-only selector uses a separate raskin-preset 1 header.
+It carries no values and defines the complete selection for capture.
+All existing selections remain built-in presets, including each standalone Apple category.
+Apple remains the default built-in. Generation continues to consume captured value documents.
+A category starter or inference helper is separate future work.

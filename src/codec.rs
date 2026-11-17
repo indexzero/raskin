@@ -10,30 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 /// Parse and validate a complete preference document without host access.
 pub fn decode(input: &str, source_name: &str) -> Result<Document> {
     let decoder = Decoder { input, source_name };
-    if input.len() > MAX_DOCUMENT_BYTES {
-        return Err(decoder.at(0, "document exceeds the 128 MiB input limit"));
-    }
-    check_nesting(input)
-        .map_err(|offset| decoder.at(offset, "document exceeds the nesting limit of 128"))?;
-    let tree = KdlDocument::parse_v2(input).map_err(|error| {
-        if let Some(diagnostic) = error.diagnostics.first() {
-            let message = format!(
-                "{}{}",
-                diagnostic
-                    .message
-                    .as_deref()
-                    .unwrap_or("invalid KDL 2 syntax"),
-                diagnostic
-                    .help
-                    .as_ref()
-                    .map(|help| format!("; {help}"))
-                    .unwrap_or_default()
-            );
-            decoder.at(diagnostic.span.offset(), message)
-        } else {
-            decoder.at(0, error.to_string())
-        }
-    })?;
+    let tree = decoder.tree()?;
     let mut document = Document::default();
     let mut groups = BTreeSet::new();
     for node in tree.nodes() {
@@ -132,12 +109,38 @@ pub fn decode(input: &str, source_name: &str) -> Result<Document> {
     Ok(document)
 }
 
-struct Decoder<'a> {
-    input: &'a str,
-    source_name: &'a str,
+pub(crate) struct Decoder<'a> {
+    pub(crate) input: &'a str,
+    pub(crate) source_name: &'a str,
 }
 impl Decoder<'_> {
-    fn at(&self, mut offset: usize, message: impl Into<String>) -> Error {
+    pub(crate) fn tree(&self) -> Result<KdlDocument> {
+        if self.input.len() > MAX_DOCUMENT_BYTES {
+            return Err(self.at(0, "document exceeds the 128 MiB input limit"));
+        }
+        check_nesting(self.input)
+            .map_err(|offset| self.at(offset, "document exceeds the nesting limit of 128"))?;
+        KdlDocument::parse_v2(self.input).map_err(|error| {
+            if let Some(diagnostic) = error.diagnostics.first() {
+                let message = format!(
+                    "{}{}",
+                    diagnostic
+                        .message
+                        .as_deref()
+                        .unwrap_or("invalid KDL 2 syntax"),
+                    diagnostic
+                        .help
+                        .as_ref()
+                        .map(|help| format!("; {help}"))
+                        .unwrap_or_default()
+                );
+                self.at(diagnostic.span.offset(), message)
+            } else {
+                self.at(0, error.to_string())
+            }
+        })
+    }
+    pub(crate) fn at(&self, mut offset: usize, message: impl Into<String>) -> Error {
         offset = offset.min(self.input.len());
         while !self.input.is_char_boundary(offset) {
             offset -= 1;
@@ -152,16 +155,16 @@ impl Decoder<'_> {
             message: message.into(),
         }
     }
-    fn error(&self, node: &KdlNode, message: impl Into<String>) -> Error {
+    pub(crate) fn error(&self, node: &KdlNode, message: impl Into<String>) -> Error {
         self.at(node.span().offset(), message)
     }
-    fn no_annotation(&self, node: &KdlNode) -> Result<()> {
+    pub(crate) fn no_annotation(&self, node: &KdlNode) -> Result<()> {
         if node.ty().is_some() {
             return Err(self.error(node, "unexpected node type annotation"));
         }
         Ok(())
     }
-    fn group(&self, node: &KdlNode) -> Result<()> {
+    pub(crate) fn group(&self, node: &KdlNode) -> Result<()> {
         self.no_annotation(node)?;
         if !node.entries().is_empty() || node.children().is_none() {
             return Err(self.error(
@@ -181,7 +184,7 @@ impl Decoder<'_> {
         }
         Ok(())
     }
-    fn namespace(&self, node: &KdlNode, prefix: &str, document: &mut Document) -> Result<()> {
+    pub(crate) fn domain(&self, node: &KdlNode, prefix: &str) -> Result<Domain> {
         self.no_annotation(node)?;
         self.check_properties(node)?;
         if !arguments(node).is_empty() || node.children().is_none() {
@@ -223,6 +226,11 @@ impl Decoder<'_> {
                 key => return Err(self.error(node, format!("unknown domain property {key:?}"))),
             }
         }
+        Ok(domain)
+    }
+    fn namespace(&self, node: &KdlNode, prefix: &str, document: &mut Document) -> Result<()> {
+        let domain = self.domain(node, prefix)?;
+        let name = domain.name.clone();
         let mut properties = BTreeMap::new();
         let mut branches = Vec::new();
         for child in node.children().expect("namespace children").nodes() {

@@ -12,20 +12,26 @@ set _usage_spec_raskin 'name raskin
 bin raskin
 version "0.1.0"
 about "Read macOS preferences into KDL and generate native commands"
-long_about "Capture persisted macOS preferences as editable KDL, then generate a standalone .macos file. Raskin never executes generated commands. Capture defaults to apple: macOS system categories plus Terminal. Select an individual category or use broad for the wider supported stores, including third-party apps."
+long_about "Capture persisted macOS preferences as editable KDL, then generate a standalone .macos file. Raskin never executes generated commands. Capture defaults to apple: macOS system categories plus Terminal. Select a built-in category, use broad for wider stores, or pass -p FILE to capture exact keys from a KDL preset."
 usage "Usage: raskin [COMMAND]"
 flag --usage-spec help="Emit the jdx/usage interface specification" hide=#true
 cmd capture help="Read persisted preferences into KDL" after_help=#"""
 Examples:
-  raskin capture --preset input -o input.kdl
+  raskin capture -p input -o input.kdl
+  raskin capture -p my-preset.kdl -o selected.kdl
   raskin capture --from ./saved-inputs -o saved.kdl
 """# {
     long_help "Read explicit persisted user, host, system and container preferences plus native power profiles. Only settings supported by generation enter KDL; unavailable or unsupported settings are omitted and summarized on stderr. No settings are changed. With --from, only the supplied offline tree is read; there is no live fallback."
     flag "-v --verbose" help="Show per-source capture diagnostics on stderr"
-    flag --preset help="Select Apple system categories plus Terminal, a category, or broad settings" default=apple {
-        arg <PRESET> {
-            choices apple broad desktop input power appearance menubar windows accessibility language shortcuts search screenshots lockscreen notifications sound updates terminal
-        }
+    flag "-p --preset" help="Select a built-in preset or a KDL file listing exact keys" default=apple {
+        long_help #"""
+Select a built-in preset or a KDL file listing exact keys. A file defines the complete selection.
+
+Built-in presets: apple broad desktop input power appearance menubar windows accessibility language shortcuts search screenshots lockscreen notifications sound updates terminal
+
+Use ./NAME for a file whose name matches a built-in preset.
+"""#
+        arg <NAME_OR_FILE>
     }
     flag --from help="Read an offline tree containing user/, system/, containers/, host-id.txt, and pmset.txt" {
         arg <DIRECTORY>

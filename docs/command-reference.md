@@ -2,7 +2,7 @@
 # `raskin`
 - **Version:** 0.1.0
 
-Capture persisted macOS preferences as editable KDL, then generate a standalone .macos file. Raskin never executes generated commands. Capture defaults to apple: macOS system categories plus Terminal. Select an individual category or use broad for the wider supported stores, including third-party apps.
+Capture persisted macOS preferences as editable KDL, then generate a standalone .macos file. Raskin never executes generated commands. Capture defaults to apple: macOS system categories plus Terminal. Select a built-in category, use broad for wider stores, or pass -p FILE to capture exact keys from a KDL preset.
 
 
 - **Usage:** `raskin [SUBCOMMAND]`
@@ -15,9 +15,11 @@ Read explicit persisted user, host, system and container preferences plus native
 
 ### Flags
 - **`-v --verbose`** — Show per-source capture diagnostics on stderr
-- **`--preset <PRESET>`** — Select Apple system categories plus Terminal, a category, or broad settings
+- **`-p --preset <NAME_OR_FILE>`** — Select a built-in preset or a KDL file listing exact keys. A file defines the complete selection.
 
-  **Choices:** `apple`, `broad`, `desktop`, `input`, `power`, `appearance`, `menubar`, `windows`, `accessibility`, `language`, `shortcuts`, `search`, `screenshots`, `lockscreen`, `notifications`, `sound`, `updates`, `terminal`
+  Built-in presets: apple broad desktop input power appearance menubar windows accessibility language shortcuts search screenshots lockscreen notifications sound updates terminal
+
+  Use ./NAME for a file whose name matches a built-in preset.
 
   **Default:** `apple`
 - **`--from <DIRECTORY>`** — Read an offline tree containing user/, system/, containers/, host-id.txt, and pmset.txt
@@ -25,7 +27,8 @@ Read explicit persisted user, host, system and container preferences plus native
 - **`--force`** — Atomically replace an existing output file
 
 Examples:
-  raskin capture --preset input -o input.kdl
+  raskin capture -p input -o input.kdl
+  raskin capture -p my-preset.kdl -o selected.kdl
   raskin capture --from ./saved-inputs -o saved.kdl
 
 ## `raskin generate`

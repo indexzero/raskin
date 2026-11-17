@@ -1,5 +1,7 @@
 # Preference schema 1
 
+This page describes captured values. Key-only selection files use [the separate preset schema](preset-schema.md).
+
 Raskin uses KDL 2 with a separate schema header:
 
 ~~~kdl

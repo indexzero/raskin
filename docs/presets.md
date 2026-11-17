@@ -1,10 +1,16 @@
 # Capture presets
 
+Use a built-in name or a file of exact keys with `-p` / `--preset`.
+File-defined presets are documented in [the preset schema](preset-schema.md), with an [editable example](../examples/presets/selected.kdl).
+A file is the complete selection and adds no built-in fields.
+
+## Built-in presets
+
 Apple is the default. It combines all 16 categories below, including Terminal.
 Use `--preset broad` to capture the wider supported stores, including other Apple apps and third-party apps.
 Use any category name with `--preset` to select that category alone.
 
-Presets select exact, case-sensitive domains. They retain every supported field within those domains, including unknown keys, counters, and learned state. They do not substitute recommended values or identify which settings you changed manually. The shared generation support checks omit unsupported complete settings from every preset.
+Built-in presets select exact, case-sensitive domains. They retain every supported field within those domains, including unknown keys, counters, and learned state. They do not substitute recommended values or identify which settings you changed manually. The shared generation support checks omit unsupported complete settings from every preset.
 
 ~~~sh
 raskin capture -o myprefs.kdl
@@ -42,7 +48,7 @@ Categories inspect matching user and system preference files, including ByHost f
 
 The existing generation mappings still determine which scopes are supported. System ByHost and current-host container values are omitted. Group containers and dedicated settings databases are outside category coverage. See [coverage](coverage.md) for provider limits.
 
-Only Apple, broad, and power read the power provider. Power reads no preference stores. Lockscreen includes persisted screen saver and login-window preferences; battery/charger display sleep remains in power.
+Among built-ins, only Apple, broad, and power read the power provider. Power reads no preference stores. Lockscreen includes persisted screen saver and login-window preferences; battery/charger display sleep remains in power.
 
 ## Retention and limits
 

@@ -1528,3 +1528,510 @@ fn apple_and_categories_keep_existing_scope_support_limits() {
         assert_capture_generates(&report);
     }
 }
+
+fn file_preset(body: &str) -> raskin::selection::FilePreset {
+    raskin::selection::FilePreset::decode(&format!("raskin-preset 1\n{body}"), "preset.kdl")
+        .unwrap()
+}
+
+#[test]
+fn file_preset_captures_exact_scoped_keys_and_whole_collections() {
+    use plist::Value as P;
+    let mut reader = MockReader::default();
+    let tiles = P::Array(vec![P::Dictionary(
+        [
+            ("label".to_owned(), P::String("Synthetic app".into())),
+            ("enabled".to_owned(), P::Boolean(true)),
+        ]
+        .into_iter()
+        .collect(),
+    )]);
+    reader.file(
+        "user/com.apple.dock.plist",
+        Ok(bytes(&[
+            ("autohide", P::Boolean(true)),
+            ("persistent-apps", tiles.clone()),
+            ("ignored", P::Integer(700.into())),
+            ("literal.dotted.key", P::Real(0.25)),
+        ])),
+    );
+    reader.file("user/com.apple.finder.plist", Ok(simple()));
+    reader.file(
+        "system/com.apple.dock.plist",
+        Ok(bytes(&[("tilesize", P::Integer(31.into()))])),
+    );
+    reader.file(
+        format!("user/ByHost/com.apple.controlcenter.{UUID}.plist"),
+        Ok(bytes(&[
+            ("Battery", P::Integer(2.into())),
+            ("Sound", P::Integer(8.into())),
+        ])),
+    );
+    reader.file(
+        "user/ByHost/com.apple.controlcenter.00000000-0000-0000-0000-000000000000.plist",
+        Ok(simple()),
+    );
+    reader.file(
+        "containers/com.example.app/com.example.shared.plist",
+        Ok(bytes(&[
+            ("selected", P::Boolean(true)),
+            ("other", P::Integer(100.into())),
+        ])),
+    );
+    reader.file(
+        "containers/com.other.app/com.example.shared.plist",
+        Ok(simple()),
+    );
+    let report = capture_with_reader(
+        &reader,
+        file_preset(
+            r#"
+defaults {
+    com {
+        apple {
+            dock { autohide; persistent-apps; "literal.dotted.key"; }
+            dock scope="system" { tilesize; }
+            controlcenter host="current" { Battery; }
+        }
+        example {
+            shared container="com.example.app" { selected; }
+        }
+    }
+}
+pmset { battery { displaysleep; } }
+"#,
+        ),
+    )
+    .unwrap();
+    assert!(report.omissions.is_empty(), "{:?}", report.diagnostics);
+    assert_eq!(report.document.domains.len(), 4);
+    let dock = &report.document.domains[&Domain::user("com.apple.dock")];
+    assert_eq!(dock.len(), 3);
+    assert_eq!(
+        dock["persistent-apps"].value,
+        Value::from_plist(tiles).unwrap()
+    );
+    assert_eq!(dock["literal.dotted.key"].value, Value::Real(0.25));
+    assert_eq!(report.document.power.len(), 1);
+    assert_eq!(report.document.power["battery"].len(), 1);
+    let reads = reader.reads.borrow();
+    assert!(!reads.iter().any(|read| read.contains("com.apple.finder")
+        || read.contains("com.other.app")
+        || read.contains("group-containers")
+        || read.contains("00000000")));
+    assert_eq!(
+        reads
+            .iter()
+            .filter(|read| read.as_str() == "host-id")
+            .count(),
+        1
+    );
+    assert_capture_generates(&report);
+}
+
+#[test]
+fn file_preset_skips_unselected_stores_and_filters_before_xml_support() {
+    use plist::Value as P;
+    let mut reader = MockReader::default();
+    reader.file(
+        "user/com.example.app.plist",
+        Ok(binary_bytes(&[
+            ("selected", P::String("before\u{1b}after".into())),
+            ("unselected-xml", P::Array(vec![P::Boolean(true)])),
+        ])),
+    );
+    reader.file(
+        format!("user/ByHost/com.example.app.{UUID}.plist"),
+        Ok(simple()),
+    );
+    let report = capture_with_reader(
+        &reader,
+        file_preset("defaults { com { example { app { selected; } } } }"),
+    )
+    .unwrap();
+    assert!(report.omissions.is_empty());
+    assert_eq!(
+        report.document.domains[&Domain::user("com.example.app")]["selected"].value,
+        Value::String("before\u{1b}after".into())
+    );
+    assert_eq!(
+        *reader.reads.borrow(),
+        ["dir:user", "file:user/com.example.app.plist"]
+    );
+    assert_capture_generates(&report);
+}
+
+#[test]
+fn empty_file_selection_and_unsupported_scopes_do_not_read_providers() {
+    let reader = MockReader::default();
+    let report = capture_with_reader(
+        &reader,
+        file_preset("defaults { com { apple {} } }\npmset {}"),
+    )
+    .unwrap();
+    assert!(report.document.domains.is_empty() && report.document.power.is_empty());
+    assert!(report.omissions.is_empty());
+    assert!(reader.reads.borrow().is_empty());
+
+    let report = capture_with_reader(
+        &reader,
+        file_preset(
+            r#"
+defaults {
+    com.example scope="system" host="current" { value; }
+    com.example host="current" container="com.example" { value; }
+    com.example container="../escape" { value; }
+}
+pmset { battery { unsupported; }; all { displaysleep; } }
+"#,
+        ),
+    )
+    .unwrap();
+    assert_eq!(report.omissions.len(), 5);
+    assert!(
+        report
+            .omissions
+            .iter()
+            .all(|entry| entry.reason == Reason::Unsupported)
+    );
+    assert!(reader.reads.borrow().is_empty());
+}
+
+#[test]
+fn missing_selected_keys_are_distinct_from_denied_malformed_and_unsupported_values() {
+    let mut reader = MockReader::default();
+    reader.file("user/com.example.present.plist", Ok(simple()));
+    reader.file(
+        "user/com.example.denied.plist",
+        Err(io::ErrorKind::PermissionDenied),
+    );
+    reader.file(
+        "user/com.example.malformed.plist",
+        Ok(b"not a plist".to_vec()),
+    );
+    reader.file(
+        "user/com.example.unsupported.plist",
+        Ok(binary_bytes(&[(
+            "value",
+            plist::Value::Uid(plist::Uid::new(9)),
+        )])),
+    );
+    let report = capture_with_reader(
+        &reader,
+        file_preset(
+            r#"
+defaults {
+    com.example {
+        present { value; missing; }
+        absent { value; }
+        denied { value; }
+        malformed { value; }
+        unsupported { value; }
+    }
+}
+pmset { battery { displaysleep; sleep; }; ups { sleep; } }
+"#,
+        ),
+    )
+    .unwrap();
+    assert_eq!(report.document.domains.len(), 1);
+    assert_eq!(report.document.power.len(), 1);
+    for (reason, count) in [
+        (Reason::Missing, 4),
+        (Reason::PermissionDenied, 1),
+        (Reason::ReadFailed, 1),
+        (Reason::Unsupported, 1),
+    ] {
+        assert_eq!(
+            report
+                .omissions
+                .iter()
+                .filter(|entry| entry.reason == reason)
+                .count(),
+            count,
+            "{reason:?}: {:?}",
+            report.diagnostics
+        );
+    }
+    assert_capture_generates(&report);
+}
+
+#[test]
+fn failed_store_enumeration_does_not_relabel_selected_keys_as_missing() {
+    for store in ["user", "system", "containers"] {
+        let mut reader = MockReader::default();
+        reader
+            .directories
+            .insert(store.into(), Err(io::ErrorKind::PermissionDenied));
+        let body = match store {
+            "user" => "defaults { com.example { a; b; } }",
+            "system" => "defaults { com.example scope=system { a; b; } }",
+            _ => "defaults { com.example container=com.example { a; b; } }",
+        };
+        let report = capture_with_reader(&reader, file_preset(body)).unwrap();
+        assert_eq!(
+            report.omissions.len(),
+            1,
+            "{store}: {:?}",
+            report.diagnostics
+        );
+        assert_eq!(report.omissions[0].reason, Reason::PermissionDenied);
+    }
+
+    let reader = MockReader {
+        power: Err(io::ErrorKind::PermissionDenied),
+        ..MockReader::default()
+    };
+    let report = capture_with_reader(
+        &reader,
+        file_preset("pmset { battery { sleep; displaysleep; } }"),
+    )
+    .unwrap();
+    assert_eq!(report.omissions.len(), 1);
+    assert_eq!(report.omissions[0].reason, Reason::PermissionDenied);
+}
+
+#[test]
+fn file_power_selection_ignores_unselected_keys_but_rejects_selected_ambiguity() {
+    let reader = MockReader {
+        power: Ok("Battery Power:\n displaysleep 5\n sleep malformed\n sleep duplicate\nAC Power:\n invalid\nAC Power:\n invalid again\n".into()),
+        ..MockReader::default()
+    };
+    let report =
+        capture_with_reader(&reader, file_preset("pmset { battery { displaysleep; } }")).unwrap();
+    assert!(report.omissions.is_empty(), "{:?}", report.diagnostics);
+    assert_eq!(
+        report.document.power["battery"]["displaysleep"].value,
+        Value::Integer(5)
+    );
+    assert_eq!(*reader.reads.borrow(), ["pmset"]);
+    assert_capture_generates(&report);
+
+    for text in [
+        "Battery Power:\n displaysleep 5\n displaysleep 6\n",
+        "Battery Power:\n displaysleep 5\nBattery Power:\n displaysleep 6\n",
+        "Battery Power:\n displaysleep malformed\n",
+        "Battery Power:\n displaysleep\n",
+    ] {
+        let reader = MockReader {
+            power: Ok(text.into()),
+            ..MockReader::default()
+        };
+        let report = capture_with_reader(
+            &reader,
+            file_preset("pmset { battery { displaysleep; sleep; } }"),
+        )
+        .unwrap();
+        assert!(report.document.power.is_empty());
+        assert!(
+            report
+                .omissions
+                .iter()
+                .all(|entry| entry.reason == Reason::ReadFailed),
+            "{:?}",
+            report.diagnostics
+        );
+    }
+}
+
+#[test]
+fn file_current_host_capture_requires_identity_and_rejects_duplicate_scoped_sources() {
+    let mut reader = MockReader::default();
+    reader.file(
+        format!("user/ByHost/com.example.app.{UUID}.plist"),
+        Ok(simple()),
+    );
+    reader.host = Err(io::ErrorKind::PermissionDenied);
+    let body = "defaults { com.example.app host=current { value; } }";
+    let report = capture_with_reader(&reader, file_preset(body)).unwrap();
+    assert!(report.document.domains.is_empty());
+    assert_eq!(report.omissions.len(), 1);
+    assert_eq!(report.omissions[0].reason, Reason::PermissionDenied);
+    assert!(
+        !reader
+            .reads
+            .borrow()
+            .iter()
+            .any(|read| read.starts_with("file:"))
+    );
+
+    reader.host = Ok(UUID.into());
+    reader.file(
+        format!("user/ByHost/com.example.app.{}.plist", UUID.to_lowercase()),
+        Ok(simple()),
+    );
+    let report = capture_with_reader(&reader, file_preset(body)).unwrap();
+    assert!(report.document.domains.is_empty());
+    assert_eq!(report.omissions.len(), 2);
+    assert!(
+        report
+            .omissions
+            .iter()
+            .all(|entry| entry.reason == Reason::ReadFailed)
+    );
+}
+
+#[test]
+fn file_preset_reports_refused_sources_without_false_missing_keys() {
+    for kind in [EntryKind::Symlink, EntryKind::Directory, EntryKind::Other] {
+        let mut reader = MockReader::default();
+        reader.add_entry(
+            Path::new("user"),
+            CaptureEntry {
+                name: "com.example.app.plist".into(),
+                kind,
+            },
+        );
+        let report = capture_with_reader(
+            &reader,
+            file_preset("defaults { com.example.app { value; } }"),
+        )
+        .unwrap();
+        assert_eq!(report.omissions.len(), 1);
+        assert_eq!(report.omissions[0].reason, Reason::Unsupported);
+        assert_eq!(*reader.reads.borrow(), ["dir:user"]);
+    }
+    for kind in [EntryKind::Symlink, EntryKind::File, EntryKind::Other] {
+        let mut reader = MockReader::default();
+        reader.add_entry(
+            Path::new("user"),
+            CaptureEntry {
+                name: "ByHost".into(),
+                kind,
+            },
+        );
+        let report = capture_with_reader(
+            &reader,
+            file_preset("defaults { com.example.app host=current { value; } }"),
+        )
+        .unwrap();
+        assert_eq!(report.omissions.len(), 1);
+        assert_eq!(report.omissions[0].reason, Reason::Unsupported);
+        assert_eq!(*reader.reads.borrow(), ["dir:user"]);
+    }
+}
+
+#[test]
+fn duplicate_file_preset_sources_do_not_leave_premature_missing_key_reports() {
+    let mut reader = MockReader::default();
+    reader.file("user/.GlobalPreferences.plist", Ok(simple()));
+    reader.file(
+        "user/NSGlobalDomain.plist",
+        Ok(bytes(&[("wanted", plist::Value::Boolean(true))])),
+    );
+    let report = capture_with_reader(
+        &reader,
+        file_preset("defaults { NSGlobalDomain { wanted; } }"),
+    )
+    .unwrap();
+    assert!(report.document.domains.is_empty());
+    assert_eq!(report.omissions.len(), 2);
+    assert!(
+        report
+            .omissions
+            .iter()
+            .all(|entry| entry.reason == Reason::ReadFailed),
+        "{:?}",
+        report.diagnostics
+    );
+}
+
+#[test]
+fn file_power_malformed_boundaries_never_reassign_values_or_claim_absence() {
+    let cases = [
+        (
+            "battery",
+            "Battery Power\n displaysleep 9\nAC Power:\n displaysleep 12\n",
+            None,
+        ),
+        (
+            "charger",
+            "AC Power:\n sleep 1\nBattery Power\n displaysleep 9\n",
+            None,
+        ),
+        (
+            "charger",
+            "AC Power:\n displaysleep 3\nBattery Power\n displaysleep 9\n",
+            Some(3),
+        ),
+        (
+            "charger",
+            "AC Power:\n sleep 1\n Battery Power:\n displaysleep 9\n",
+            None,
+        ),
+        (
+            "charger",
+            "AC Power:\n sleep 1\n Battery Power\n displaysleep 9\n",
+            None,
+        ),
+        (
+            "charger",
+            "AC Power:\n sleep 1\n Battery Power :\n displaysleep 9\n",
+            None,
+        ),
+        (
+            "charger",
+            "AC Power:\n sleep 1\n Future Power:\n displaysleep 9\n",
+            None,
+        ),
+        (
+            "charger",
+            "AC Power:\n displaysleep 3\n displaysleep 9:\n",
+            None,
+        ),
+    ];
+    for (profile, text, expected) in cases {
+        let reader = MockReader {
+            power: Ok(text.into()),
+            ..MockReader::default()
+        };
+        let body = format!("pmset {{ {profile} {{ displaysleep; sleep; }} }}");
+        let report = capture_with_reader(&reader, file_preset(&body)).unwrap();
+        let value = report
+            .document
+            .power
+            .get(profile)
+            .and_then(|keys| keys.get("displaysleep"))
+            .map(|setting| setting.value.clone());
+        assert_eq!(value, expected.map(Value::Integer), "{text:?}");
+        assert!(!report.omissions.is_empty());
+        assert!(
+            report
+                .omissions
+                .iter()
+                .all(|entry| entry.reason == Reason::ReadFailed),
+            "{:?}",
+            report.diagnostics
+        );
+        assert_capture_generates(&report);
+    }
+}
+
+#[test]
+fn file_power_ignores_malformed_values_in_unselected_known_fields() {
+    for excluded in [
+        "sleep invalid:",
+        "sleep",
+        "sleep invalid extra:",
+        "haltlevel invalid:",
+    ] {
+        let reader = MockReader {
+            power: Ok(format!("Battery Power:\n {excluded}\n displaysleep 9\n")),
+            ..MockReader::default()
+        };
+        let report =
+            capture_with_reader(&reader, file_preset("pmset { battery { displaysleep; } }"))
+                .unwrap();
+        assert!(
+            report.omissions.is_empty(),
+            "{excluded}: {:?}",
+            report.diagnostics
+        );
+        assert_eq!(
+            report.document.power["battery"]["displaysleep"].value,
+            Value::Integer(9)
+        );
+        assert_eq!(report.document.power["battery"].len(), 1);
+        assert_capture_generates(&report);
+    }
+}

@@ -4,6 +4,7 @@ use raskin::{
     capture::{self, CaptureReport, Preset},
     codec,
     render::{self, GenerateOptions},
+    selection::{FilePreset, Selection},
 };
 use std::{
     io::{Read, Write},
@@ -15,9 +16,9 @@ use std::{
 #[command(
     version,
     about = "Read macOS preferences into KDL and generate native commands",
-    long_about = "Capture persisted macOS preferences as editable KDL, then generate a standalone .macos file. Raskin never executes generated commands. Capture defaults to apple: macOS system categories plus Terminal. Select an individual category or use broad for the wider supported stores, including third-party apps.",
+    long_about = "Capture persisted macOS preferences as editable KDL, then generate a standalone .macos file. Raskin never executes generated commands. Capture defaults to apple: macOS system categories plus Terminal. Select a built-in category, use broad for wider stores, or pass -p FILE to capture exact keys from a KDL preset.",
     arg_required_else_help = true,
-    after_help = "Examples:\n  raskin capture -o myprefs.kdl\n  raskin capture --preset desktop -o desktop.kdl\n  raskin generate myprefs.kdl -o myprefs.macos\n\nReview the generated file before running it yourself. See docs/coverage.md for limits."
+    after_help = "Examples:\n  raskin capture -o myprefs.kdl\n  raskin capture -p desktop -o desktop.kdl\n  raskin capture -p my-preset.kdl -o selected.kdl\n  raskin generate myprefs.kdl -o myprefs.macos\n\nReview the generated file before running it yourself. See docs/coverage.md for limits."
 )]
 struct Cli {
     /// Emit the jdx/usage interface specification.
@@ -31,15 +32,16 @@ enum Commands {
     #[command(
         about = "Read persisted preferences into KDL",
         long_about = "Read explicit persisted user, host, system and container preferences plus native power profiles. Only settings supported by generation enter KDL; unavailable or unsupported settings are omitted and summarized on stderr. No settings are changed. With --from, only the supplied offline tree is read; there is no live fallback.",
-        after_help = "Examples:\n  raskin capture --preset input -o input.kdl\n  raskin capture --from ./saved-inputs -o saved.kdl"
+        after_help = "Examples:\n  raskin capture -p input -o input.kdl\n  raskin capture -p my-preset.kdl -o selected.kdl\n  raskin capture --from ./saved-inputs -o saved.kdl"
     )]
     Capture {
         /// Show per-source capture diagnostics on stderr.
         #[arg(short, long)]
         verbose: bool,
-        /// Select Apple system categories plus Terminal, a category, or broad settings.
-        #[arg(long, default_value=Preset::default().as_str(), value_parser=clap::builder::PossibleValuesParser::new(Preset::all().map(Preset::as_str)))]
-        preset: String,
+        /// Select a built-in preset or a KDL file listing exact keys.
+        #[arg(short, long, value_name="NAME_OR_FILE", value_hint=ValueHint::FilePath,
+            default_value=Preset::default().as_str(), long_help=preset_help())]
+        preset: PathBuf,
         /// Read an offline tree containing user/, system/, containers/, host-id.txt, and pmset.txt.
         #[arg(long, value_name="DIRECTORY", value_hint=ValueHint::DirPath)]
         from: Option<PathBuf>,
@@ -120,14 +122,14 @@ fn run(cli: Cli) -> Result<()> {
             output,
             force,
         }) => {
-            let preset = preset.parse::<Preset>()?;
+            let (selection, label) = capture_selection(&preset, output.as_deref())?;
             let report = match from {
-                Some(root) => capture::capture_offline(&root, preset)?,
-                None => capture::capture_live(preset)?,
+                Some(root) => capture::capture_offline(&root, selection)?,
+                None => capture::capture_live(selection)?,
             };
             let text = codec::encode(&report.document)?;
             emit(output.as_deref(), text.as_bytes(), force, false)?;
-            capture_summary(&report, output.as_deref(), preset, verbose);
+            capture_summary(&report, output.as_deref(), &label, verbose);
             Ok(())
         }
         Some(Commands::Generate {
@@ -182,6 +184,45 @@ fn run(cli: Cli) -> Result<()> {
         )),
     }
 }
+fn preset_help() -> String {
+    format!(
+        "Select a built-in preset or a KDL file listing exact keys. A file defines the complete selection.\n\nBuilt-in presets: {}\n\nUse ./NAME for a file whose name matches a built-in preset.",
+        Preset::all()
+            .map(Preset::as_str)
+            .collect::<Vec<_>>()
+            .join(" ")
+    )
+}
+
+fn capture_selection(input: &Path, output: Option<&Path>) -> Result<(Selection, String)> {
+    if let Some(preset) = input.to_str().and_then(|name| name.parse::<Preset>().ok()) {
+        return Ok((preset.into(), preset.to_string()));
+    }
+    if let Some(output) = output {
+        artifact::reject_alias(input, output)?;
+    }
+    let mut bytes = Vec::new();
+    std::fs::File::open(input)
+        .and_then(|file| {
+            file.take(raskin::model::MAX_DOCUMENT_BYTES as u64 + 1)
+                .read_to_end(&mut bytes)
+        })
+        .map_err(|error| Error::io("read preset", input, error))?;
+    if bytes.len() > raskin::model::MAX_DOCUMENT_BYTES {
+        return Err(Error::Invalid(
+            "preset exceeds the 128 MiB input limit".into(),
+        ));
+    }
+    let text = String::from_utf8(bytes).map_err(|error| {
+        Error::Invalid(format!(
+            "{}: preset KDL must be UTF-8: {error}",
+            input.display()
+        ))
+    })?;
+    let preset = FilePreset::decode(&text, &input.to_string_lossy())?;
+    Ok((preset.into(), format!("{input:?}")))
+}
+
 fn emit(path: Option<&Path>, bytes: &[u8], force: bool, executable: bool) -> Result<()> {
     match path {
         Some(path) => artifact::write(path, bytes, force, executable),
@@ -193,7 +234,7 @@ fn emit(path: Option<&Path>, bytes: &[u8], force: bool, executable: bool) -> Res
 }
 
 /// Summaries belong on stderr, and only after the artifact was written.
-fn capture_summary(report: &CaptureReport, output: Option<&Path>, preset: Preset, verbose: bool) {
+fn capture_summary(report: &CaptureReport, output: Option<&Path>, preset: &str, verbose: bool) {
     let partial = if report.omissions.is_empty() {
         ""
     } else {

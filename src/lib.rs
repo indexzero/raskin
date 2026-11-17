@@ -9,6 +9,7 @@ mod error;
 pub mod model;
 pub mod presets;
 pub mod render;
+pub mod selection;
 mod support;
 
 pub use error::{Error, Result};

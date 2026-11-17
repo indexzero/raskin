@@ -2,6 +2,8 @@
 
 ## 0.1.0 (unreleased)
 
+- Add file-defined presets through `capture -p FILE`, selecting exact scoped keys and separate power profiles. Keep all existing selections as built-in presets.
+
 - Default capture to apple: the union of 15 system categories plus Terminal. Keep broad available explicitly.
 - Retain all supported fields in category domains, including unknown fields and counters. Desktop and input now select whole domains and supported system/container scopes.
 - Ignore new local .kdl and .macos files while retaining tracked fixtures and interface artifacts.

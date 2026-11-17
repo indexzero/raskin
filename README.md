@@ -22,14 +22,25 @@ Live capture targets macOS 13 or later. Offline capture and generation also work
 
 ## Examples
 
-Capture broadly, then generate:
+Capture the default Apple selection, then generate:
 
 ~~~sh
 raskin capture -o myprefs.kdl
 raskin generate myprefs.kdl -o myprefs.macos
 ~~~
 
-Select a category or the wider capture:
+Capture only the keys you care about with a [file-defined preset](docs/preset-schema.md).
+Start from [the key-only example](examples/presets/selected.kdl), remove unwanted keys, and add your own:
+
+~~~sh
+raskin capture -p set-of-values-that-i-care-about.kdl -o actuallymatter.kdl
+raskin generate actuallymatter.kdl -o actuallymatter.macos
+~~~
+
+That preset lists keys without values. Capture reads their current stored values, retaining complete arrays and dictionaries.
+Missing or unsupported values are omitted. The file is the complete selection, with no implicit Apple additions.
+
+The existing selections remain **built-in presets**. Select a category or the wider capture:
 
 ~~~sh
 raskin capture --preset desktop -o desktop.kdl
@@ -67,7 +78,7 @@ raskin generate myprefs.kdl --strict -o myprefs.macos
 
 After a successful write, generation reports the destination and number of generated settings. Partial output also summarizes skipped settings by reason; --verbose expands the details on stderr. Counts refer to top-level settings, including when a nested value is unsupported.
 
-Paths supplied with -o are written atomically. Existing output is refused unless --force is supplied. KDL files are private; generated scripts are private and executable. Generation refuses to overwrite its KDL input.
+Paths supplied with -o are written atomically. Existing output is refused unless --force is supplied. KDL files are private; generated scripts are private and executable. Generation refuses to overwrite its KDL input. Capture also refuses to overwrite its preset file, including through an alias.
 
 ## The file is the operation
 

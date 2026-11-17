@@ -16,6 +16,7 @@ use crate::{
 };
 
 pub use crate::presets::Preset;
+use crate::selection::{FilePreset, Selection};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct CaptureReport {
@@ -77,18 +78,18 @@ impl CaptureReader for OfflineReader {
     }
 }
 
-pub fn capture_offline(root: &Path, preset: Preset) -> Result<CaptureReport> {
-    capture_with_reader(&OfflineReader::new(root), preset)
+pub fn capture_offline(root: &Path, selection: impl Into<Selection>) -> Result<CaptureReport> {
+    capture_with_reader(&OfflineReader::new(root), selection)
 }
 
-pub fn capture_live(preset: Preset) -> Result<CaptureReport> {
+pub fn capture_live(selection: impl Into<Selection>) -> Result<CaptureReport> {
     #[cfg(target_os = "macos")]
     {
-        capture_with_reader(&native::NativeReader::new()?, preset)
+        capture_with_reader(&native::NativeReader::new()?, selection)
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = preset;
+        let _ = selection;
         Err(Error::Invalid(
             "live capture requires macOS; use --from for an offline input tree".into(),
         ))
@@ -97,10 +98,14 @@ pub fn capture_live(preset: Preset) -> Result<CaptureReport> {
 
 /// Capture only through the supplied read boundary; useful for denied reads and
 /// source enumeration tests without touching the machine's preference stores.
-pub fn capture_with_reader(reader: &impl CaptureReader, preset: Preset) -> Result<CaptureReport> {
+pub fn capture_with_reader(
+    reader: &impl CaptureReader,
+    selection: impl Into<Selection>,
+) -> Result<CaptureReport> {
     let mut capture = Capture {
         reader,
-        preset,
+        selection: selection.into(),
+        pending: None,
         document: Document::default(),
         omissions: Vec::new(),
         diagnostics: Vec::new(),
@@ -108,22 +113,27 @@ pub fn capture_with_reader(reader: &impl CaptureReader, preset: Preset) -> Resul
         host_attempted: false,
         sources: BTreeMap::new(),
         excluded_sources: 0,
+        filtered_keys: 0,
     };
-    if preset == Preset::Broad {
+    capture.prepare_selection();
+    if capture.selection.is_broad() {
         capture.resolve_host();
     }
-    if preset.includes_preferences() {
-        capture.preferences(Path::new("user"), Scope::User, None, false);
-        capture.preferences(Path::new("system"), Scope::System, None, false);
+    for (path, scope) in [("user", Scope::User), ("system", Scope::System)] {
+        if capture.selection.includes_store(scope, None, None) {
+            capture.preferences(Path::new(path), scope, None, false);
+        }
+    }
+    if capture.selection.includes_containers() {
         capture.containers();
     }
-    if preset == Preset::Broad {
+    if capture.selection.is_broad() {
         capture.group_containers();
     }
-    if preset.includes_power() {
+    if capture.selection.includes_power() {
         capture.power();
     }
-    if preset == Preset::Broad {
+    if capture.selection.is_broad() {
         for provider in UNSUPPORTED_PROVIDERS {
             capture.unavailable(
                 format!("provider:{provider}"),
@@ -132,6 +142,7 @@ pub fn capture_with_reader(reader: &impl CaptureReader, preset: Preset) -> Resul
             );
         }
     }
+    capture.report_missing();
     capture.retain_supported();
     capture.document.validate()?;
     capture.omissions.sort();
@@ -143,19 +154,27 @@ pub fn capture_with_reader(reader: &impl CaptureReader, preset: Preset) -> Resul
         .chain(capture.document.power.values())
         .map(BTreeMap::len)
         .sum::<usize>();
-    let exclusions = match preset {
-        Preset::Broad => {
-            "none by preset; unsupported providers and unavailable sources are listed separately"
-        }
-        Preset::Power => {
-            "all preference stores, group containers and non-power dedicated providers"
-        }
-        Preset::Apple => {
-            "unselected domains and containers, group containers and dedicated providers other than power"
-        }
-        _ => "unselected domains and containers, group containers, power and dedicated providers",
+    let (label, exclusions) = match &capture.selection {
+        Selection::BuiltIn(preset) => (
+            preset.as_str(),
+            match preset {
+                Preset::Broad => {
+                    "none by preset; unsupported providers and unavailable sources are listed separately"
+                }
+                Preset::Power => {
+                    "all preference stores, group containers and non-power dedicated providers"
+                }
+                Preset::Apple => {
+                    "unselected domains and containers, group containers and dedicated providers other than power"
+                }
+                _ => {
+                    "unselected domains and containers, group containers, power and dedicated providers"
+                }
+            },
+        ),
+        Selection::File(_) => ("file", "all unselected stores, domains and keys"),
     };
-    capture.diagnostics.push(format!("preset {preset}: included {included} keys; filtered 0 keys in selected domains; intentionally excluded {} discovered sources; exclusions: {exclusions}", capture.excluded_sources));
+    capture.diagnostics.push(format!("preset {label}: included {included} keys; filtered {} keys in selected domains; intentionally excluded {} discovered sources; exclusions: {exclusions}", capture.filtered_keys, capture.excluded_sources));
     Ok(CaptureReport {
         document: capture.document,
         omissions: capture.omissions,
@@ -189,7 +208,8 @@ const UNSUPPORTED_PROVIDERS: &[&str] = &[
 
 struct Capture<'a, R> {
     reader: &'a R,
-    preset: Preset,
+    selection: Selection,
+    pending: Option<FilePreset>,
     document: Document,
     omissions: Vec<Unavailable>,
     diagnostics: Vec<String>,
@@ -197,8 +217,90 @@ struct Capture<'a, R> {
     host_attempted: bool,
     sources: BTreeMap<Domain, String>,
     excluded_sources: usize,
+    filtered_keys: usize,
 }
 impl<R: CaptureReader> Capture<'_, R> {
+    fn prepare_selection(&mut self) {
+        let Selection::File(mut file) = self.selection.clone() else {
+            return;
+        };
+        file.domains.retain(|domain, keys| {
+            let issue = crate::support::domain_issue(domain).or_else(|| {
+                (domain.scope == Scope::System && specialized_system_domain(&domain.name))
+                    .then_some("special system owner requires its dedicated power/network mapping")
+            });
+            if let Some(issue) = issue {
+                for key in keys.iter() {
+                    self.unavailable(
+                        format!("{} key {key:?}", domain.identity()),
+                        Reason::Unsupported,
+                        issue,
+                    );
+                }
+                false
+            } else {
+                true
+            }
+        });
+        file.power.retain(|profile, keys| {
+            keys.retain(|key| {
+                if power_key_supported(profile, key) {
+                    true
+                } else {
+                    self.unavailable(
+                        format!("pmset:{profile}/{key}"),
+                        Reason::Unsupported,
+                        "unknown profile or non-writable/unknown power key",
+                    );
+                    false
+                }
+            });
+            !keys.is_empty()
+        });
+        self.pending = Some(file.clone());
+        self.selection = Selection::File(file);
+    }
+
+    // A failed source read already has a reason. Do not also label its keys missing.
+    fn forget_store(&mut self, scope: Scope, container: Option<&str>, host: Option<Host>) {
+        if let Some(pending) = &mut self.pending {
+            pending.domains.retain(|domain, _| {
+                !(domain.scope == scope
+                    && domain.container.as_deref() == container
+                    && host.is_none_or(|host| domain.host == host))
+            });
+        }
+    }
+
+    fn forget_domain(&mut self, domain: &Domain) -> Option<BTreeSet<String>> {
+        self.pending
+            .as_mut()
+            .and_then(|pending| pending.domains.remove(domain))
+    }
+
+    fn report_missing(&mut self) {
+        if let Some(pending) = self.pending.take() {
+            for (domain, keys) in pending.domains {
+                for key in keys.iter() {
+                    self.unavailable(
+                        format!("{} key {key:?}", domain.identity()),
+                        Reason::Missing,
+                        "selected preference was not found",
+                    );
+                }
+            }
+            for (profile, keys) in pending.power {
+                for key in keys.iter() {
+                    self.unavailable(
+                        format!("pmset:{profile}/{key}"),
+                        Reason::Missing,
+                        "selected power setting was not found",
+                    );
+                }
+            }
+        }
+    }
+
     fn retain_supported(&mut self) {
         let support = crate::support::analyze(&self.document);
         for (domain, keys) in support.defaults {
@@ -289,7 +391,15 @@ impl<R: CaptureReader> Capture<'_, R> {
         }
     }
     fn preferences(&mut self, path: &Path, scope: Scope, container: Option<&str>, by_host: bool) {
+        if by_host && self.pending.is_some() {
+            self.resolve_host();
+            if self.host.is_none() {
+                self.forget_store(scope, container, Some(Host::Current));
+                return;
+            }
+        }
         let Some(entries) = self.list(path, format!("defaults:{}", path.display())) else {
+            self.forget_store(scope, container, by_host.then_some(Host::Current));
             return;
         };
         for entry in entries {
@@ -298,6 +408,10 @@ impl<R: CaptureReader> Capture<'_, R> {
             };
             let source = format!("defaults:{}", file_path.display());
             let Some(name) = entry.name.to_str() else {
+                if self.pending.is_some() {
+                    self.excluded_sources += 1;
+                    continue;
+                }
                 self.unavailable(
                     source,
                     Reason::Unsupported,
@@ -305,16 +419,33 @@ impl<R: CaptureReader> Capture<'_, R> {
                 );
                 continue;
             };
+            if name == "ByHost"
+                && !by_host
+                && !self
+                    .selection
+                    .includes_store(scope, container, Some(Host::Current))
+            {
+                self.excluded_sources += 1;
+                continue;
+            }
             if entry.kind == EntryKind::Directory && name == "ByHost" && !by_host {
                 self.preferences(&file_path, scope, container, true);
                 continue;
             }
             if entry.kind == EntryKind::Symlink && name == "ByHost" {
                 self.unavailable(source, Reason::Unsupported, "ByHost symlink refused");
+                self.forget_store(scope, container, Some(Host::Current));
                 continue;
             }
-            if entry.kind == EntryKind::Directory {
-                if self.preset != Preset::Broad {
+            if name == "ByHost" && !by_host && self.pending.is_some() {
+                self.unavailable(source, Reason::Unsupported, "ByHost is not a directory");
+                self.forget_store(scope, container, Some(Host::Current));
+                continue;
+            }
+            if entry.kind == EntryKind::Directory
+                && (self.pending.is_none() || !name.ends_with(".plist"))
+            {
+                if !self.selection.is_broad() {
                     self.excluded_sources += 1;
                 } else {
                     self.unavailable(
@@ -326,7 +457,7 @@ impl<R: CaptureReader> Capture<'_, R> {
                 continue;
             }
             let Some(stem) = name.strip_suffix(".plist") else {
-                if self.preset == Preset::Broad {
+                if self.selection.is_broad() {
                     self.unavailable(
                         source,
                         Reason::Unsupported,
@@ -341,6 +472,10 @@ impl<R: CaptureReader> Capture<'_, R> {
                 match stem.rsplit_once('.') {
                     Some((domain, suffix)) => (domain, Some(suffix)),
                     None => {
+                        if self.pending.is_some() {
+                            self.excluded_sources += 1;
+                            continue;
+                        }
                         self.unavailable(
                             source,
                             Reason::Unsupported,
@@ -357,11 +492,28 @@ impl<R: CaptureReader> Capture<'_, R> {
             } else {
                 raw_domain
             };
-            if !self.preset.includes_source(name, container) {
+            let domain = Domain {
+                name: name.to_owned(),
+                scope,
+                host: if by_host { Host::Current } else { Host::Any },
+                container: container.map(str::to_owned),
+            };
+            if !self.selection.includes_source(&domain) {
+                self.excluded_sources += 1;
+                continue;
+            }
+            if self.pending.is_some()
+                && let Some(suffix) = suffix
+                && !self
+                    .host
+                    .as_ref()
+                    .is_some_and(|host| host.eq_ignore_ascii_case(suffix))
+            {
                 self.excluded_sources += 1;
                 continue;
             }
             if entry.kind != EntryKind::File {
+                self.forget_domain(&domain);
                 let detail = if entry.kind == EntryKind::Symlink {
                     "symlink refused"
                 } else {
@@ -419,12 +571,7 @@ impl<R: CaptureReader> Capture<'_, R> {
                     }
                 }
             }
-            let domain = Domain {
-                name: name.to_owned(),
-                scope,
-                host: if by_host { Host::Current } else { Host::Any },
-                container: container.map(str::to_owned),
-            };
+            let requested_keys = self.forget_domain(&domain);
             if let Some(previous) = self.sources.get(&domain).cloned() {
                 self.document.domains.remove(&domain);
                 self.unavailable(
@@ -447,7 +594,7 @@ impl<R: CaptureReader> Capture<'_, R> {
                     continue;
                 }
             };
-            let properties = match parse_plist(&bytes) {
+            let mut properties = match parse_plist(&bytes) {
                 Ok(Value::Dict(properties)) => properties,
                 Ok(_) => {
                     self.unavailable(
@@ -466,10 +613,25 @@ impl<R: CaptureReader> Capture<'_, R> {
                     continue;
                 }
             };
+            if let Some(mut requested) = requested_keys {
+                requested.retain(|key| !properties.contains_key(key));
+                if !requested.is_empty()
+                    && let Some(pending) = &mut self.pending
+                {
+                    // Defer absence reports: a later duplicate source can still
+                    // invalidate this domain and clear its pending keys.
+                    pending.domains.insert(domain.clone(), requested);
+                }
+            }
+            let before = properties.len();
+            properties.retain(|key, _| self.selection.includes_key(&domain, key));
+            self.filtered_keys += before - properties.len();
             if properties.is_empty() {
-                self.diagnostics.push(format!(
-                    "{source}: empty preference dictionary; no stored keys"
-                ));
+                if before == 0 {
+                    self.diagnostics.push(format!(
+                        "{source}: empty preference dictionary; no stored keys"
+                    ));
+                }
                 continue;
             }
             self.document.domains.insert(domain, properties);
@@ -478,22 +640,32 @@ impl<R: CaptureReader> Capture<'_, R> {
     fn containers(&mut self) {
         let path = Path::new("containers");
         let Some(entries) = self.list(path, "defaults:containers".into()) else {
+            if let Some(pending) = &mut self.pending {
+                pending
+                    .domains
+                    .retain(|domain, _| domain.container.is_none());
+            }
             return;
         };
         for entry in entries {
             let Some(container_path) = self.entry_path(path, &entry) else {
                 continue;
             };
-            if self.preset != Preset::Broad
+            if !self.selection.is_broad()
                 && !entry
                     .name
                     .to_str()
-                    .is_some_and(|id| self.preset.includes_container(id))
+                    .is_some_and(|id| self.selection.includes_container(id))
             {
                 self.excluded_sources += 1;
                 continue;
             }
             let source = format!("defaults:{}", container_path.display());
+            if entry.kind != EntryKind::Directory
+                && let Some(id) = entry.name.to_str()
+            {
+                self.forget_store(Scope::User, Some(id), None);
+            }
             match (entry.name.to_str(), entry.kind) {
                 (Some(id), EntryKind::Directory) => {
                     self.preferences(&container_path, Scope::User, Some(id), false)
@@ -529,11 +701,19 @@ impl<R: CaptureReader> Capture<'_, R> {
     fn power(&mut self) {
         match self.reader.power_text() {
             Ok(text) => self.parse_power(&text),
-            Err(error) => self.read_error("provider:pmset".into(), error),
+            Err(error) => {
+                self.read_error("provider:pmset".into(), error);
+                if let Some(pending) = &mut self.pending {
+                    pending.power.clear();
+                }
+            }
         }
     }
     fn parse_power(&mut self, text: &str) {
         if text.len() > MAX_DOCUMENT_BYTES {
+            if let Some(pending) = &mut self.pending {
+                pending.power.clear();
+            }
             self.unavailable(
                 "provider:pmset".into(),
                 Reason::ReadFailed,
@@ -542,6 +722,7 @@ impl<R: CaptureReader> Capture<'_, R> {
             return;
         }
         let mut current: Option<String> = None;
+        let mut incomplete_profiles = false;
         let mut headings = BTreeSet::new();
         let mut invalid = BTreeSet::new();
         let mut keys: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
@@ -556,6 +737,7 @@ impl<R: CaptureReader> Capture<'_, R> {
                 .filter(|_| !raw_line.starts_with(char::is_whitespace))
             {
                 if heading.is_empty() {
+                    incomplete_profiles = true;
                     self.unavailable(
                         format!("provider:pmset:line:{}", index + 1),
                         Reason::ReadFailed,
@@ -570,6 +752,11 @@ impl<R: CaptureReader> Capture<'_, R> {
                     "UPS Power" => "ups".to_owned(),
                     _ => format!("unknown:{heading}"),
                 };
+                if !self.selection.includes_profile(&profile) {
+                    headings.insert(profile.clone());
+                    current = Some(profile);
+                    continue;
+                }
                 if !headings.insert(profile.clone()) {
                     invalid.insert(profile.clone());
                     self.unavailable(
@@ -588,7 +775,33 @@ impl<R: CaptureReader> Capture<'_, R> {
                 current = Some(profile);
                 continue;
             }
+            // Native headings begin at column zero and end in a colon.
+            // Indented known fields use key selection and value validation below,
+            // including malformed values. Other malformed boundaries must break
+            // the profile before filtering can hide them.
+            let known_field = raw_line.starts_with(char::is_whitespace)
+                && line.split_whitespace().next().is_some_and(|key| {
+                    ["battery", "charger", "ups"]
+                        .into_iter()
+                        .any(|profile| power_key_supported(profile, key))
+                });
+            if self.pending.is_some()
+                && !known_field
+                && (!raw_line.starts_with(char::is_whitespace)
+                    || line.ends_with(':')
+                    || matches!(line, "Battery Power" | "AC Power" | "UPS Power"))
+            {
+                incomplete_profiles = true;
+                current = None;
+                self.unavailable(
+                    format!("provider:pmset:line:{}", index + 1),
+                    Reason::ReadFailed,
+                    "malformed power profile heading",
+                );
+                continue;
+            }
             let Some(profile) = current.as_ref() else {
+                incomplete_profiles = true;
                 self.unavailable(
                     format!("provider:pmset:line:{}", index + 1),
                     Reason::ReadFailed,
@@ -596,7 +809,19 @@ impl<R: CaptureReader> Capture<'_, R> {
                 );
                 continue;
             };
+            if !self.selection.includes_profile(profile) {
+                continue;
+            }
             let parts: Vec<_> = line.split_whitespace().collect();
+            if !self.selection.includes_power_key(profile, parts[0]) {
+                self.filtered_keys += 1;
+                continue;
+            }
+            if let Some(pending) = &mut self.pending
+                && let Some(keys) = pending.power.get_mut(profile)
+            {
+                keys.remove(parts[0]);
+            }
             // Native output can contain display labels such as "Sleep On Power
             // Button". Account for those unsupported fields without discarding
             // the valid settings beside them. Extra tokens on a known command
@@ -651,6 +876,13 @@ impl<R: CaptureReader> Capture<'_, R> {
                 .or_default()
                 .insert(key.to_owned(), Value::Integer(value.into()).into());
         }
+        if (incomplete_profiles || headings.is_empty())
+            && let Some(pending) = &mut self.pending
+        {
+            // Incomplete profile enumeration cannot establish that requested
+            // values are absent. The structural read failures explain omission.
+            pending.power.clear();
+        }
         if headings.is_empty() {
             self.unavailable(
                 "provider:pmset".into(),
@@ -659,7 +891,10 @@ impl<R: CaptureReader> Capture<'_, R> {
             );
         }
         for (profile, seen) in &keys {
-            if seen.is_empty() && matches!(profile.as_str(), "battery" | "charger" | "ups") {
+            if self.pending.is_none()
+                && seen.is_empty()
+                && matches!(profile.as_str(), "battery" | "charger" | "ups")
+            {
                 invalid.insert(profile.clone());
                 self.unavailable(
                     format!("pmset:{profile}"),
@@ -670,6 +905,9 @@ impl<R: CaptureReader> Capture<'_, R> {
         }
         for profile in invalid {
             profiles.remove(&profile);
+            if let Some(pending) = &mut self.pending {
+                pending.power.remove(&profile);
+            }
             self.unavailable(
                 format!("pmset:{profile}"),
                 Reason::ReadFailed,

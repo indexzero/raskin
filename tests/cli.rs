@@ -702,7 +702,7 @@ fn capture_defaults_to_apple_and_keeps_broad_explicit() {
 
     for preset in Preset::all() {
         let result = cli(
-            &["capture", "--from", "source", "--preset", preset.as_str()],
+            &["capture", "--from", "source", "-p", preset.as_str()],
             &dir,
         );
         assert!(
@@ -731,9 +731,190 @@ fn capture_defaults_to_apple_and_keeps_broad_explicit() {
     assert!(spec.contains("default=apple"));
     for preset in Preset::all() {
         assert!(help.contains(preset.as_str()), "{preset}");
-        assert!(
-            spec.split_whitespace().any(|word| word == preset.as_str()),
-            "{preset}"
+        assert!(spec.contains(preset.as_str()), "{preset}");
+    }
+}
+
+#[test]
+fn file_presets_capture_only_requested_keys_then_generate_without_skips() {
+    use raskin::{Domain, Value};
+    let tmp = temp();
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("source/user")).unwrap();
+    fs::write(dir.join("source/user/com.apple.dock.plist"),
+        r#"<?xml version="1.0"?><plist version="1.0"><dict><key>autohide</key><true/><key>ignored</key><integer>99</integer></dict></plist>"#).unwrap();
+    fs::write(
+        dir.join("selected.kdl"),
+        "raskin-preset 1\ndefaults { com { apple { dock { autohide; missing; } } } }\n",
+    )
+    .unwrap();
+    for (flag, output) in [("-p", "one.kdl"), ("--preset", "two.kdl")] {
+        let captured = cli(
+            &[
+                "capture",
+                flag,
+                "selected.kdl",
+                "--from",
+                "source",
+                "-o",
+                output,
+            ],
+            dir,
         );
+        assert!(
+            captured.status.success(),
+            "{}",
+            String::from_utf8_lossy(&captured.stderr)
+        );
+        assert!(captured.stdout.is_empty());
+        let summary = String::from_utf8(captured.stderr).unwrap();
+        assert!(summary.contains("Captured 1 settings"));
+        assert!(summary.contains("1 missing"));
+        assert!(summary.lines().count() <= 5);
+        let text = fs::read_to_string(dir.join(output)).unwrap();
+        assert!(
+            !text.contains("unavailable") && !text.contains("missing") && !text.contains("ignored")
+        );
+        let document = codec::decode(&text, output).unwrap();
+        assert_eq!(document.domains.len(), 1);
+        assert_eq!(
+            document.domains[&Domain::user("com.apple.dock")]["autohide"].value,
+            Value::Boolean(true)
+        );
+    }
+    assert_eq!(
+        fs::read(dir.join("one.kdl")).unwrap(),
+        fs::read(dir.join("two.kdl")).unwrap()
+    );
+    let generated = cli(
+        &["generate", "one.kdl", "--strict", "-o", "selected.macos"],
+        dir,
+    );
+    assert!(generated.status.success());
+    let script = fs::read_to_string(dir.join("selected.macos")).unwrap();
+    assert!(script.contains("'autohide' -bool 'TRUE'"));
+    assert!(!script.contains("ignored") && !script.contains("Skipped:"));
+    let verbose = cli(
+        &[
+            "capture",
+            "-p",
+            "selected.kdl",
+            "--from",
+            "source",
+            "--verbose",
+        ],
+        dir,
+    );
+    assert!(verbose.status.success());
+    assert!(
+        String::from_utf8(verbose.stderr)
+            .unwrap()
+            .contains("selected preference was not found")
+    );
+}
+
+#[test]
+fn file_preset_errors_precede_capture_and_never_replace_output() {
+    let tmp = temp();
+    let dir = tmp.path();
+    fs::write(dir.join("output.kdl"), "preserve this").unwrap();
+    fs::write(dir.join("invalid.kdl"), "raskin 1\ndefaults {}").unwrap();
+    fs::write(
+        dir.join("values.kdl"),
+        "raskin-preset 1\ndefaults { com.example { value 3; } }",
+    )
+    .unwrap();
+    fs::write(dir.join("nonutf8.kdl"), [0xff]).unwrap();
+    for preset in ["missing.kdl", "invalid.kdl", "values.kdl", "nonutf8.kdl"] {
+        let result = cli(
+            &[
+                "capture",
+                "-p",
+                preset,
+                "--from",
+                "never-opened",
+                "-o",
+                "output.kdl",
+                "--force",
+            ],
+            dir,
+        );
+        assert!(!result.status.success() && result.stdout.is_empty());
+        let error = String::from_utf8(result.stderr).unwrap();
+        assert!(
+            !error.contains("Captured") && !error.contains("Saved"),
+            "{error}"
+        );
+        assert_eq!(
+            fs::read_to_string(dir.join("output.kdl")).unwrap(),
+            "preserve this"
+        );
+    }
+    fs::write(
+        dir.join("empty.kdl"),
+        "raskin-preset 1\ndefaults {}\npmset {}",
+    )
+    .unwrap();
+    let result = cli(
+        &["capture", "-p", "empty.kdl", "--from", "never-opened"],
+        dir,
+    );
+    assert!(result.status.success());
+    let document = codec::decode(std::str::from_utf8(&result.stdout).unwrap(), "empty").unwrap();
+    assert!(document.domains.is_empty() && document.power.is_empty());
+    assert!(
+        !String::from_utf8(result.stderr)
+            .unwrap()
+            .contains("Skipped")
+    );
+}
+
+#[test]
+fn preset_files_are_protected_from_output_aliases_and_names_can_be_disambiguated() {
+    let tmp = temp();
+    let dir = tmp.path();
+    let text = "raskin-preset 1\n";
+    fs::write(dir.join("desktop"), text).unwrap();
+    let result = cli(
+        &["capture", "-p", "./desktop", "--from", "never-opened"],
+        dir,
+    );
+    assert!(result.status.success());
+    fs::hard_link(dir.join("desktop"), dir.join("alias.kdl")).unwrap();
+    for output in ["desktop", "alias.kdl"] {
+        let result = cli(
+            &[
+                "capture",
+                "-p",
+                "./desktop",
+                "--from",
+                "never-opened",
+                "-o",
+                output,
+                "--force",
+            ],
+            dir,
+        );
+        assert!(!result.status.success());
+        assert_eq!(fs::read_to_string(dir.join("desktop")).unwrap(), text);
+    }
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(dir.join("desktop"), dir.join("linked.kdl")).unwrap();
+        let result = cli(
+            &[
+                "capture",
+                "-p",
+                "./desktop",
+                "--from",
+                "never-opened",
+                "-o",
+                "linked.kdl",
+                "--force",
+            ],
+            dir,
+        );
+        assert!(!result.status.success());
+        assert_eq!(fs::read_to_string(dir.join("desktop")).unwrap(), text);
     }
 }

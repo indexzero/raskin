@@ -127,7 +127,7 @@ pub(crate) fn analyze(document: &Document) -> Support {
     support
 }
 
-fn domain_issue(domain: &Domain) -> Option<&'static str> {
+pub(crate) fn domain_issue(domain: &Domain) -> Option<&'static str> {
     if !safe_identifier(&domain.name) {
         return Some(
             "unsafe domain identity (use nonempty alphanumeric, underscore, or hyphen segments)",
