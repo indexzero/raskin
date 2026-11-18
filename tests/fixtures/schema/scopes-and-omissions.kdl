@@ -1,0 +1,36 @@
+// Synthetic domains and omissions illustrate scope and diagnostics.
+// inline=meta illustrates optional descriptive metadata. It is not captured setting data.
+raskin 1
+
+defaults {
+    org {
+        example {
+            host-scoped host="current" {
+                enabled #true inline=meta
+            }
+
+            system-scoped scope="system" {
+                enabled #true inline=meta
+            }
+
+            sandboxed-domain container="org.example.app" {
+                enabled #true inline=meta
+            }
+        }
+    }
+}
+
+pmset {
+    battery {
+        displaysleep 5 inline=meta
+    }
+    charger {
+        displaysleep 30 inline=meta
+    }
+    ups {
+        displaysleep 10 inline=meta
+    }
+}
+
+unavailable "domain:org.example.locked" reason="permission-denied"
+unavailable "provider:example-unsupported-store" reason="unsupported"

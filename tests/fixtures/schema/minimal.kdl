@@ -1,0 +1,27 @@
+// Illustrative values only. This is not a capture of the owner's Mac.
+// inline=meta illustrates optional descriptive metadata. It is not captured setting data.
+raskin 1
+
+defaults {
+    NSGlobalDomain {
+        AppleShowAllExtensions #true inline=meta
+    }
+
+    com {
+        apple {
+            dock {
+                autohide #true inline=meta
+                tilesize 48 inline=meta
+            }
+        }
+    }
+}
+
+pmset {
+    battery {
+        displaysleep 5 inline=meta
+    }
+    charger {
+        displaysleep 30 inline=meta
+    }
+}

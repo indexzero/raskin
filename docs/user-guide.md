@@ -1,0 +1,67 @@
+# User guide
+
+Use capture to read source settings and generate to compile saved KDL. The [command reference](command-reference.md) is generated from the CLI usage specification.
+
+## Saved input trees
+
+Offline capture uses an isolated directory:
+
+~~~text
+saved-inputs/
+  user/
+    .GlobalPreferences.plist
+    com.example.app.plist
+    ByHost/com.example.app.SOURCE-UUID.plist
+  system/
+    com.example.service.plist
+  containers/
+    com.example.container/
+      com.example.app.plist
+  group-containers/
+    group.example.app/
+  host-id.txt
+  pmset.txt
+~~~
+
+The user and system directories stand for Library/Preferences. Each containers child stands for that app's Data/Library/Preferences directory. Optional group-containers children account for unsupported stores; their contents are not read.
+
+host-id.txt contains one source UUID. pmset.txt contains native pmset -g custom output with explicit profile headings. Missing/malformed inputs are reported in capture diagnostics. There is no fallback to the current machine.
+
+~~~sh
+raskin capture --from saved-inputs -o saved.kdl
+raskin generate saved.kdl -o saved.macos
+~~~
+
+Observed symlinks are refused, including ancestor paths. Use the real path when a temporary-directory alias is a symlink. Metadata checks do not provide an adversarial sandbox against concurrent symlink replacement.
+
+## Failures and partial output
+
+Malformed KDL reports its source, line and column. Unsupported versions fail. Fix input before generating again.
+
+Unavailable capture sources and settings without a supported generation mapping are omitted from KDL. Capture uses the same support analysis as generation, including domain-wide XML constraints and power ranges. It keeps supported neighboring settings and omits whole unsupported top-level values. Unedited output from the current capture can pass strict generation with the same version. Older or manually edited KDL can still contain unsupported settings. Generation emits supported settings by default and skips complete top-level settings that have no faithful mapping. It reports counts by reason and names each skipped setting in script comments. Generation --verbose expands the affected settings and nested paths on stderr. A successful write reports its destination and number of generated settings, followed by a compact summary of any skips. Nothing is written automatically beside the script.
+
+Counts refer to top-level settings, not individual nested failures. A setting with several unsupported nested values counts once per reason; a note explains when reason counts overlap. Normal output shows the six most frequent reasons at most, with an additional count if more exist. --verbose includes all details. Unsupported empty domains/profiles and legacy capture omission records are reported separately.
+
+~~~sh
+raskin generate myprefs.kdl --verbose -o myprefs.macos 2> generation.log
+~~~
+
+The log is optional. Default generation returns success after writing the supported settings. Use --strict to return nonzero before any output if an unsupported setting is found; stdout and any existing output file stay untouched. Invalid KDL and output errors always fail. The earlier --skip-unsupported option is still accepted for compatibility and has the same behavior as the default; it cannot be combined with --strict.
+
+--force replaces output atomically. It does not permit overwriting input, including via hard links or symlinks. A missing parent directory is an error.
+
+Stdout contains only the artifact or usage specification. Diagnostics use stderr. Success returns zero; invalid input/output failures return nonzero. After a successful write, capture reports the destination, captured setting count, and power profiles. A partial capture also summarizes skipped sources by reason. Per-source details require --verbose. Capture diagnostics are not saved as preference nodes or an automatic sidecar.
+
+~~~sh
+raskin capture --verbose -o myprefs.kdl 2> capture.log
+~~~
+
+The redirected log is optional. A write failure returns nonzero and does not print a success summary. Rejected power profiles remain visible even without --verbose.
+
+Permission-denied sources remain unreadable until access is available. macOS privacy controls can require Full Disk Access for the terminal application running Raskin; ordinary file permissions can also deny reads. Raskin does not change those permissions or retry with elevated privileges. See Apple's [file-access controls](https://support.apple.com/guide/security/controlling-app-access-to-files-secddd1d86a6/web) and the [coverage matrix](coverage.md).
+
+## Comparison and handoff
+
+Use the same preset on both machines. Compare matching KDL or script files. Existing tools handle comparison, backup, and transfer.
+
+Inspect the generated script before running it yourself. Read [native mappings](native-commands.md) for compound values and scope behavior. No Raskin runtime is needed on the destination.

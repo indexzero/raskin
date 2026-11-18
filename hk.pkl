@@ -1,0 +1,22 @@
+amends "package://github.com/jdx/hk/releases/download/v1.50.0/hk@1.50.0#/Config.pkl"
+
+local linters = new Mapping<String, Step> {
+    ["fmt"] {
+        glob = "**/*.rs"
+        check = "cargo fmt --all -- --check"
+        fix = "cargo fmt --all"
+    }
+    ["clippy"] {
+        glob = List("**/*.rs", "Cargo.toml", "Cargo.lock")
+        check = "cargo clippy --workspace --all-targets --locked -- -D warnings"
+    }
+    ["interface-docs"] {
+        glob = List("src/main.rs", "src/presets.rs", "raskin.usage.kdl", "docs/**", "completions/**", "scripts/gen-docs.sh")
+        check = "bash scripts/gen-docs.sh --check"
+    }
+}
+
+hooks {
+    ["pre-commit"] { steps = linters }
+    ["check"] { steps = linters }
+}

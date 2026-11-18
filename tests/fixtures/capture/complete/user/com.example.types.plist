@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Boolean</key>
+	<true/>
+	<key>Bytes</key>
+	<data>
+	AAABD/8=
+	</data>
+	<key>Date</key>
+	<date>2026-10-30T19:24:05Z</date>
+	<key>EmptyArray</key>
+	<array/>
+	<key>EmptyData</key>
+	<data>
+	</data>
+	<key>EmptyDictionary</key>
+	<dict/>
+	<key>Integer</key>
+	<integer>1</integer>
+	<key>MaximumUnsigned</key>
+	<integer>18446744073709551615</integer>
+	<key>MinimumSigned</key>
+	<integer>-9223372036854775808</integer>
+	<key>NegativeZero</key>
+	<real>-0.0</real>
+	<key>Nested</key>
+	<dict>
+		<key>literal.dotted.key</key>
+		<array>
+			<true/>
+			<integer>1</integer>
+			<real>1.0</real>
+			<dict>
+				<key>-</key>
+				<string>dictionary key</string>
+			</dict>
+		</array>
+	</dict>
+	<key>Real</key>
+	<real>1.0</real>
+	<key>RepeatedArray</key>
+	<array>
+		<string>same</string>
+		<string>same</string>
+	</array>
+	<key>Singleton</key>
+	<array>
+		<string>one</string>
+	</array>
+	<key>String</key>
+	<string>Unicode café 日本語
+quotes '" $HOME `text`</string>
+</dict>
+</plist>

@@ -1,0 +1,1 @@
+{ "bytes" = <00010f>; "empty-data" = <>; "empty-dict" = { }; "empty-list" = (); "nested" = ({ "name" = "one"; }, ("two")); "repeated" = ("123", "123", "TRUE", "(x)"); "singleton" = ("only"); }

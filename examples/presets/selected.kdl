@@ -1,0 +1,38 @@
+// List the settings you want to capture. This file contains no preference values.
+raskin-preset 1
+
+defaults {
+    com {
+        apple {
+            dock {
+                autohide
+                orientation
+                tilesize
+                // Selecting a collection captures the complete stored value.
+                persistent-apps
+            }
+            finder {
+                AppleShowAllFiles
+                ShowPathbar
+            }
+            controlcenter host="current" {
+                Battery
+                Bluetooth
+                Sound
+            }
+            screencapture {
+                location
+                type
+            }
+        }
+    }
+}
+
+pmset {
+    battery {
+        displaysleep
+    }
+    charger {
+        displaysleep
+    }
+}
